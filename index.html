@@ -1,54 +1,157 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" class="boot">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
   <title>四时之屋 · House of Seasons</title>
+  <!-- 关键内联样式：首屏在外部 CSS 到达前就必须是一块"设计好的加载页"，
+       否则刷新瞬间会露出未上样的 HUD（原始按钮 + 黑底文字）。 -->
+  <style>
+    html { background: #07090c; }
+    html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+    /* 加载期间隐藏控制面板，避免未上样的控件闪一下 */
+    html.boot #hud { opacity: 0; visibility: hidden; }
+
+    #loader {
+      position: fixed; inset: 0; z-index: 60;
+      display: grid; place-items: center;
+      background:
+        radial-gradient(120% 85% at 50% 8%, #16202b 0%, #0b0e14 55%, #06080b 100%);
+      color: #e9e4dc;
+      font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+        "Source Han Sans SC", "Noto Sans CJK SC", system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      transition: opacity 700ms ease, visibility 0s linear 700ms;
+    }
+    #loader.done { opacity: 0; visibility: hidden; }
+    /* 极轻的暗角，让加载页也有"画面"感 */
+    #loader::after {
+      content: ''; position: absolute; inset: 0; pointer-events: none;
+      background: radial-gradient(75% 60% at 50% 45%, transparent 55%, rgba(0, 0, 0, 0.45) 100%);
+    }
+    #loader .boot-inner {
+      position: relative; z-index: 1;
+      display: grid; justify-items: center; gap: 18px;
+      animation: boot-rise 900ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+    }
+    .boot-title {
+      font-size: 32px; font-weight: 500; letter-spacing: 0.34em; text-indent: 0.34em;
+      color: #f0ece4;
+    }
+    .boot-sub {
+      font-size: 11px; letter-spacing: 0.42em; text-indent: 0.42em;
+      color: rgba(233, 228, 220, 0.46); text-transform: uppercase;
+    }
+    .boot-rule {
+      width: 44px; height: 1px; margin: 2px 0 4px;
+      background: linear-gradient(90deg, transparent, rgba(233, 228, 220, 0.5), transparent);
+    }
+    .boot-bar {
+      position: relative; width: 168px; height: 2px; border-radius: 2px;
+      background: rgba(233, 228, 220, 0.12); overflow: hidden;
+    }
+    .boot-bar::after {
+      content: ''; position: absolute; top: 0; bottom: 0; width: 42%;
+      background: linear-gradient(90deg, transparent, #d9b07a, transparent);
+      animation: boot-slide 1.35s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+    }
+    .boot-label {
+      font-size: 11px; letter-spacing: 0.24em; text-indent: 0.24em;
+      color: rgba(233, 228, 220, 0.62);
+    }
+    .boot-hint {
+      position: absolute; left: 50%; bottom: calc(28px + env(safe-area-inset-bottom, 0px));
+      transform: translateX(-50%);
+      font-size: 11px; letter-spacing: 0.18em;
+      color: rgba(233, 228, 220, 0.28);
+      white-space: nowrap;
+    }
+    @keyframes boot-slide {
+      0% { transform: translateX(-110%); }
+      100% { transform: translateX(340%); }
+    }
+    @keyframes boot-rise {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: none; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .boot-inner { animation: none; }
+      .boot-bar::after { animation: none; width: 100%; opacity: 0.5; }
+    }
+    /* 初始化失败：进度条停在原地，文案换成可读的错误提示 */
+    #loader.failed .boot-bar::after {
+      animation: none; width: 100%; opacity: 0.55;
+      background: #b4553f;
+    }
+    #loader.failed .boot-label { color: #d98a72; letter-spacing: 0.12em; }
+  </style>
 </head>
 <body>
-  <main id="app" aria-label="四时之屋 3D 场景"></main>
-  <div id="loader" role="status" aria-live="polite">正在构建场景 …</div>
+  <!-- 加载页：品牌锁定 + 不确定进度条。JS 首帧渲染完成后加 .done 淡出并移除 -->
+  <div id="loader" role="status" aria-live="polite" aria-busy="true">
+    <div class="boot-inner">
+      <div class="boot-title">四时之屋</div>
+      <div class="boot-sub">House of Seasons</div>
+      <div class="boot-rule"></div>
+      <div class="boot-bar"></div>
+      <div class="boot-label">正在构建场景</div>
+    </div>
+    <div class="boot-hint">拖拽旋转 · 滚轮缩放</div>
+  </div>
 
-  <header id="brand">
-    <h1>四时之屋</h1>
-    <p>House of Seasons · 拖拽旋转 / 滚轮缩放</p>
-  </header>
+  <main id="app" aria-label="四时之屋 3D 场景"></main>
 
   <section id="hud" aria-label="场景控制">
     <div id="readout">
-      <span class="readout-main">
+      <div class="readout-main">
         <span id="moodTime">16:30</span>
         <span id="moodCtx" role="status" aria-live="polite">秋 · 晴</span>
-      </span>
-      <button class="tab tour" type="button" id="tourBtn" aria-label="自动巡游视角" aria-pressed="false">巡游</button>
+      </div>
+      <button class="tour" type="button" id="tourBtn" aria-label="自动巡游视角" aria-pressed="false">
+        <span class="tour-mark" aria-hidden="true"></span>巡游
+      </button>
     </div>
 
-    <div class="tabrow" role="group" aria-labelledby="lbl-time">
-      <span class="tablabel" id="lbl-time">时刻</span>
-      <button class="chip" type="button" data-snap="7.5" aria-label="跳到早晨 07:30" aria-pressed="false">早</button>
-      <button class="chip" type="button" data-snap="12.5" aria-label="跳到正午 12:30" aria-pressed="false">中</button>
-      <button class="chip" type="button" data-snap="18.5" aria-label="跳到傍晚 18:30" aria-pressed="false">晚</button>
+    <div class="row" role="group" aria-labelledby="lbl-time">
+      <span class="rowlabel" id="lbl-time">时刻</span>
+      <div class="seg seg-snap">
+        <button class="chip" type="button" data-snap="7.5" aria-label="跳到早晨 07:30" aria-pressed="false">早</button>
+        <button class="chip" type="button" data-snap="12.5" aria-label="跳到正午 12:30" aria-pressed="false">中</button>
+        <button class="chip" type="button" data-snap="18.5" aria-label="跳到傍晚 18:30" aria-pressed="false">晚</button>
+      </div>
       <input id="hourSlider" type="range" min="0" max="24" step="0.05" value="16.5"
              aria-label="时刻" aria-valuetext="16:30">
     </div>
 
-    <div class="tabrow" role="group" aria-labelledby="lbl-season">
-      <span class="tablabel" id="lbl-season">季节</span>
-      <button class="tab" type="button" data-season="sp" aria-label="春季" aria-pressed="false">春</button>
-      <button class="tab" type="button" data-season="su" aria-label="夏季" aria-pressed="false">夏</button>
-      <button class="tab" type="button" data-season="au" aria-label="秋季" aria-pressed="true">秋</button>
-      <button class="tab" type="button" data-season="wi" aria-label="冬季" aria-pressed="false">冬</button>
-    </div>
+    <div class="halves">
+      <div class="row" role="group" aria-labelledby="lbl-season">
+        <span class="rowlabel" id="lbl-season">季节</span>
+        <div class="seg">
+          <button class="tab" type="button" data-season="sp" aria-label="春季" aria-pressed="false">春</button>
+          <button class="tab" type="button" data-season="su" aria-label="夏季" aria-pressed="false">夏</button>
+          <button class="tab" type="button" data-season="au" aria-label="秋季" aria-pressed="true">秋</button>
+          <button class="tab" type="button" data-season="wi" aria-label="冬季" aria-pressed="false">冬</button>
+        </div>
+      </div>
 
-    <div class="tabrow" role="group" aria-labelledby="lbl-weather">
-      <span class="tablabel" id="lbl-weather">天气</span>
-      <button class="tab" type="button" data-weather="clear" aria-label="晴天" aria-pressed="true">晴</button>
-      <button class="tab" type="button" data-weather="cloudy" aria-label="多云" aria-pressed="false">多云</button>
-      <button class="tab" type="button" data-weather="rain" aria-label="下雨" aria-pressed="false">雨</button>
-      <button class="tab" type="button" data-weather="snow" aria-label="下雪" aria-pressed="false">雪</button>
+      <div class="row" role="group" aria-labelledby="lbl-weather">
+        <span class="rowlabel" id="lbl-weather">天气</span>
+        <div class="seg">
+          <button class="tab" type="button" data-weather="clear" aria-label="晴天" aria-pressed="true">晴</button>
+          <button class="tab" type="button" data-weather="cloudy" aria-label="多云" aria-pressed="false">多云</button>
+          <button class="tab" type="button" data-weather="rain" aria-label="下雨" aria-pressed="false">雨</button>
+          <button class="tab" type="button" data-weather="snow" aria-label="下雪" aria-pressed="false">雪</button>
+        </div>
+      </div>
     </div>
   </section>
+
+  <noscript>
+    <div style="position:fixed;inset:0;display:grid;place-items:center;background:#0b0e14;color:#e9e4dc;font-family:system-ui,sans-serif;text-align:center;padding:24px">
+      <p style="font-size:14px;letter-spacing:0.08em">四时之屋需要 JavaScript 与 WebGL 才能运行，请在开启后刷新页面。</p>
+    </div>
+  </noscript>
 
   <script type="module" src="/src/main.ts"></script>
 </body>

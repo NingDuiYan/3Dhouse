@@ -1,21 +1,33 @@
 import * as THREE from 'three'
 import type { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js'
-import { DPR_MAX, FRAME_FAST_MS, FRAME_SLOW_MS } from '../config'
+import { FRAME_FAST_MS, FRAME_SLOW_MS } from '../config'
+import type { QualityTier } from '../types'
+import { clampDprForTier, watchdogStep } from './quality'
 
 export interface LoopHooks {
-  update(dt: number, t: number): void
+  /** dt 为物理步长（已封顶 0.05s）；rawDt 为真实帧时长，供缓动按真实时间推进用 */
+  update(dt: number, t: number, rawDt: number): void
+  /** 画质档位或像素比变化时回调：由装配层重建阴影贴图与后处理分辨率 */
+  onQuality?(tier: QualityTier, dpr: number): void
 }
 
-/** 主循环：rAF 驱动 + 自适应 DPR（持续掉帧降采样、恢复后回升） */
+/**
+ * 功能：主循环（rAF 驱动 + 画质看门狗）。
+ * 参数：renderer/composer/camera 渲染对象，hooks 每帧回调，initialTier 设备初判的起始档位。
+ * 返回：start() 启动循环。
+ * 说明：帧时长先喂给 watchdogStep —— 降级先降档（阴影/Bloom/烘焙间隔），档到底才降像素比。
+ */
 export function createLoop(
   renderer: THREE.WebGLRenderer,
   composer: EffectComposer,
   camera: THREE.PerspectiveCamera,
-  hooks: LoopHooks
+  hooks: LoopHooks,
+  initialTier: QualityTier = 'high'
 ): { start(): void } {
   const clock = new THREE.Clock()
   let raf = 0
-  let dpr = Math.min(window.devicePixelRatio, DPR_MAX)
+  let tier: QualityTier = initialTier
+  let dpr = clampDprForTier(window.devicePixelRatio, tier)
   let slowFrames = 0
   let fastFrames = 0
 
@@ -23,10 +35,10 @@ export function createLoop(
     raf = requestAnimationFrame(tick)
     const rawDt = clock.getDelta()
     const dt = Math.min(rawDt, 0.05)
-    hooks.update(dt, clock.elapsedTime)
+    hooks.update(dt, clock.elapsedTime, rawDt)
     composer.render()
 
-    // 自适应 DPR：滚动窗口计数，避免单帧尖峰误判
+    // 画质看门狗：滚动窗口计数，避免单帧尖峰误判
     const ms = rawDt * 1000
     if (ms > FRAME_SLOW_MS) {
       slowFrames++
@@ -35,15 +47,14 @@ export function createLoop(
       fastFrames++
       slowFrames = 0
     }
-    if (slowFrames >= 90 && dpr > 1) {
-      dpr = Math.max(1, dpr - 0.25)
-      applySize()
-      slowFrames = 0
-    } else if (fastFrames >= 240 && dpr < DPR_MAX) {
-      dpr = Math.min(DPR_MAX, dpr + 0.25)
-      applySize()
-      fastFrames = 0
-    }
+    const step = watchdogStep({ tier, dpr, slowFrames, fastFrames })
+    if (!step.changed) return
+    tier = step.tier
+    dpr = step.dpr
+    slowFrames = 0
+    fastFrames = 0
+    applySize()
+    hooks.onQuality?.(tier, dpr)
   }
 
   function applySize(): void {

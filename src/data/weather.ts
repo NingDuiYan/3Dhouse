@@ -8,15 +8,19 @@ export interface WeatherProfile {
   fogMul: number
   expMul: number
   wet: number
+  /** 草量倍率（雨天湿润更旺、雪天被压住） */
+  grassMul: number
+  /** 花量倍率（雨打落、雪压没） */
+  flowerMul: number
   /** 粒子模式：season 表示交给季节决定，否则强制覆盖 */
   particle: 'season' | ParticleMode
 }
 
 export const WEATHERS: Record<Weather, WeatherProfile> = {
-  clear: { label: '晴', cloud: 0, lightMul: 1.0, fogMul: 1.0, expMul: 1.0, wet: 0.95, particle: 'season' },
-  cloudy: { label: '多云', cloud: 0.85, lightMul: 0.55, fogMul: 1.2, expMul: 0.92, wet: 0.95, particle: 'season' },
-  rain: { label: '雨', cloud: 1.0, lightMul: 0.35, fogMul: 1.8, expMul: 0.8, wet: 0.35, particle: 'rain' },
-  snow: { label: '雪', cloud: 0.9, lightMul: 0.6, fogMul: 1.6, expMul: 0.85, wet: 0.95, particle: 'snow' }
+  clear: { label: '晴', cloud: 0, lightMul: 1.0, fogMul: 1.0, expMul: 1.0, wet: 0.95, grassMul: 1.0, flowerMul: 1.0, particle: 'season' },
+  cloudy: { label: '多云', cloud: 0.85, lightMul: 0.55, fogMul: 1.2, expMul: 0.92, wet: 0.95, grassMul: 0.98, flowerMul: 0.92, particle: 'season' },
+  rain: { label: '雨', cloud: 1.0, lightMul: 0.35, fogMul: 1.8, expMul: 0.8, wet: 0.35, grassMul: 1.06, flowerMul: 0.45, particle: 'rain' },
+  snow: { label: '雪', cloud: 0.9, lightMul: 0.6, fogMul: 1.6, expMul: 0.85, wet: 0.95, grassMul: 0.55, flowerMul: 0.1, particle: 'snow' }
 }
 
 /** 季节默认粒子 */

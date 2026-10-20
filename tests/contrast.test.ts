@@ -40,27 +40,23 @@ function over(
   ]
 }
 
-/** 多段线性渐变的取值（用于复算 #brand 衬底与横向 mask） */
-function gradientAt(stops: [number, number][], t: number): number {
-  if (t <= stops[0][0]) return stops[0][1]
-  for (let i = 0; i < stops.length - 1; i++) {
-    const [p0, v0] = stops[i]
-    const [p1, v1] = stops[i + 1]
-    if (t >= p0 && t <= p1) return v0 + ((v1 - v0) * (t - p0)) / (p1 - p0)
-  }
-  return stops[stops.length - 1][1]
-}
-
 // —— 与 src/ui/style.css 第 1 节 token 保持同步 ——
 // 说明：CSS 变量无法被测试运行时读取，改 token 时必须同步这里，否则断言会失真。
 const INK = hex('#0b0e14')
 const PANEL_ALPHA = 0.86
 const TEXT = { '1': hex('#f2f4f8'), '2': hex('#c3cad8'), '3': hex('#98a2b4') }
 const FOCUS = hex('#8ecbff')
-const BORDER_ALPHA = 0.46
-const FILL_REST_ALPHA = 0.06
-const FILL_SEL_ALPHA = 0.14
-/** 四档时刻色带（day 档取纯白：与正文同色会使选中描边差跌到 1.00:1） */
+/** 分组容器描边（四档季节色温 + 中性态）与内部填充 */
+const EDGE_ALPHA = 0.4
+const SEG_FILL_ALPHA = 0.05
+const EDGES: Record<string, [number, number, number]> = {
+  中性: [255, 255, 255],
+  春: [238, 246, 234],
+  夏: [234, 247, 240],
+  秋: [247, 240, 230],
+  冬: [234, 242, 250]
+}
+/** 四档时刻色带（选中药丸实心填充，墨色字压在上面） */
 const BANDS: Record<string, [number, number, number]> = {
   dawn: hex('#f0c9a8'),
   day: hex('#9ecbff'),
@@ -91,50 +87,35 @@ describe('HUD 面板在半透明下仍应满足 WCAG AA', () => {
     })
   }
 
-  it('四档强调色文字在各自选中填充上都应 >= 4.5', () => {
-    for (const base of Object.values(BASES)) {
-      const panel = panelOn(base)
-      for (const accent of Object.values(BANDS)) {
-        const selected = over(accent, FILL_SEL_ALPHA, panel)
-        expect(contrast(accent, selected)).toBeGreaterThanOrEqual(4.5)
-      }
+  it('选中药丸的墨色字压在四档色带上都应 >= 4.5', () => {
+    for (const [band, accent] of Object.entries(BANDS)) {
+      expect(contrast(INK, accent), `${band} 档药丸文字不足 4.5:1`).toBeGreaterThanOrEqual(4.5)
     }
   })
 
-  it('焦点环对面板应满足非文本 3:1', () => {
+  it('焦色环对面板应满足非文本 3:1', () => {
     for (const base of Object.values(BASES)) {
       expect(contrast(FOCUS, panelOn(base))).toBeGreaterThanOrEqual(3)
     }
   })
 
-  it('控件描边对面板与对控件填充两侧都应 >= 3（1.4.11）', () => {
-    for (const base of Object.values(BASES)) {
-      const panel = panelOn(base)
-      const stroke = over([255, 255, 255], BORDER_ALPHA, panel)
-      const fill = over([255, 255, 255], FILL_REST_ALPHA, panel)
-      expect(contrast(stroke, panel)).toBeGreaterThanOrEqual(3)
-      expect(contrast(stroke, fill)).toBeGreaterThanOrEqual(3)
-    }
-  })
-
-  it('四档选中指示条直接压在面板上，应 >= 3（1.4.11 状态可辨）', () => {
+  it('选中药丸的实心色带本身就是状态指示，对面板应 >= 3（1.4.11）', () => {
     for (const base of Object.values(BASES)) {
       const panel = panelOn(base)
       for (const [band, accent] of Object.entries(BANDS)) {
-        expect(
-          contrast(accent, panel),
-          `${band} 档选中指示条与面板无法区分`
-        ).toBeGreaterThanOrEqual(3)
+        expect(contrast(accent, panel), `${band} 档药丸与面板无法区分`).toBeGreaterThanOrEqual(3)
       }
     }
   })
 
-  it('四档 accent 与其选中填充之间应可区分（指示条与填充不相邻则无强制要求，作退守检查）', () => {
+  it('分组容器描边在四季色温下对面板都应 >= 3（1.4.11 控件边界）', () => {
     for (const base of Object.values(BASES)) {
       const panel = panelOn(base)
-      for (const [band, accent] of Object.entries(BANDS)) {
-        const selected = over(accent, FILL_SEL_ALPHA, panel)
-        expect(contrast(accent, selected), `${band} 档 accent 与选中底混同`).toBeGreaterThanOrEqual(3)
+      for (const [name, edge] of Object.entries(EDGES)) {
+        expect(
+          contrast(over(edge, EDGE_ALPHA, panel), panel),
+          `${name}档容器描边与面板无法区分`
+        ).toBeGreaterThanOrEqual(3)
       }
     }
   })
@@ -143,55 +124,10 @@ describe('HUD 面板在半透明下仍应满足 WCAG AA', () => {
     const weak = over(INK, 0.55, [255, 255, 255])
     expect(contrast(TEXT['3'], weak)).toBeLessThan(4.5)
   })
-})
 
-describe('#brand 渐变衬底在亮场景下仍能托住标题与副标题', () => {
-  // 与 style.css 的 #brand::before 同参数
-  const SCRIM_TOP = -32
-  const SCRIM_HEIGHT = 168
-  const PAD_TOP = 14
-  const PAD_LEFT = 20
-  const H1_H = 26 * 1.2
-  const P_H = 12 * 1.15
-  const TEXT_WIDTH = 280
-  const SCRIM_WIDTH = TEXT_WIDTH + PAD_LEFT * 2 + 96
-  const VERTICAL: [number, number][] = [
-    [0, 0.92],
-    [0.62, 0.86],
-    [1, 0]
-  ]
-  const HORIZONTAL: [number, number][] = [
-    [0, 1],
-    [0.88, 1],
-    [1, 0]
-  ]
-
-  const centerY = [
-    PAD_TOP + H1_H / 2,
-    PAD_TOP + H1_H + 8 + P_H / 2
-  ]
-  const sampleX = [PAD_LEFT / SCRIM_WIDTH, (PAD_LEFT + TEXT_WIDTH) / SCRIM_WIDTH]
-
-  it('标题与副标题在四最亮底上对比度都应 >= 4.5', () => {
-    for (const base of Object.values(BASES)) {
-      for (const y of centerY) {
-        for (const x of sampleX) {
-          const alpha =
-            gradientAt(VERTICAL, (y - SCRIM_TOP) / SCRIM_HEIGHT) *
-            gradientAt(HORIZONTAL, x)
-          const backdrop = over(INK, alpha, base)
-          expect(contrast(hex('#f4f1e8'), backdrop)).toBeGreaterThanOrEqual(4.5)
-          expect(contrast(TEXT['2'], backdrop)).toBeGreaterThanOrEqual(4.5)
-        }
-      }
-    }
-  })
-
-  it('衬底退化哨兵：横竖渐变同时缩短时副标题应跌破 4.5', () => {
-    const backdrops: [number, number, number] = [255, 255, 255]
-    const alpha =
-      gradientAt([[0, 0.92], [0.42, 0.86], [1, 0]], (centerY[1] - SCRIM_TOP) / SCRIM_HEIGHT) *
-      gradientAt([[0, 1], [0.55, 1], [1, 0]], sampleX[1])
-    expect(contrast(TEXT['2'], over(INK, alpha, backdrops))).toBeLessThan(4.5)
+  it('容器填充与面板之间只需可感知（不承担 1.4.11，作回归哨兵）', () => {
+    const panel = panelOn([255, 255, 255])
+    const fill = over([255, 255, 255], SEG_FILL_ALPHA, panel)
+    expect(contrast(fill, panel)).toBeGreaterThan(1.1)
   })
 })

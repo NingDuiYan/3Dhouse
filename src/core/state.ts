@@ -28,7 +28,11 @@ export function createParams(): SceneParams {
     snow: 0,
     ffGlow: 0,
     cloud: 0,
-    wet: 0.95
+    wet: 0.95,
+    grassLevel: 1,
+    grass: new THREE.Color(0x000000),
+    bloomLevel: 1,
+    flower: new THREE.Color(0x000000)
   }
 }
 
@@ -55,6 +59,9 @@ export function resolveParams(state: TimeState, out: SceneParams): SceneParams {
   out.exp *= w.expMul
   out.cloud = w.cloud
   out.wet = w.wet
+  // 天气对庭院的影响：草量/花量随雨雪折损（晴天满量）
+  out.grassLevel *= w.grassMul
+  out.bloomLevel *= w.flowerMul
 
   out.lamp = lampLevel(out.elev)
   out.ffGlow = state.season === 'su' && out.elev < 2 && (state.weather === 'clear' || state.weather === 'cloudy') ? 1 : 0
@@ -72,10 +79,12 @@ export function copyParams(dst: SceneParams, src: SceneParams): void {
 type NumKey =
   | 'elev' | 'azim' | 'rayleigh' | 'sunInt' | 'hemiInt' | 'fogD' | 'exp'
   | 'lamp' | 'bloom' | 'folScale' | 'snow' | 'ffGlow' | 'cloud' | 'wet'
+  | 'grassLevel' | 'bloomLevel'
 
 const NUM_ALL: NumKey[] = [
   'elev', 'azim', 'rayleigh', 'sunInt', 'hemiInt', 'fogD', 'exp',
-  'lamp', 'bloom', 'folScale', 'snow', 'ffGlow', 'cloud', 'wet'
+  'lamp', 'bloom', 'folScale', 'snow', 'ffGlow', 'cloud', 'wet',
+  'grassLevel', 'bloomLevel'
 ]
 
 /** 当前参数向目标参数做指数缓动（数值 lerp + 颜色 lerp，零分配） */

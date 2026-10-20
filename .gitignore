@@ -2,6 +2,7 @@ node_modules/
 dist/
 .iga/
 .screenshots/
+.tmp/
 .trae/
 .trae-html-share-packages/
 .vscode/

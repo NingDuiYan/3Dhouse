@@ -47,6 +47,44 @@ describe('resolveParams 应给出物理自洽的逐时参数', () => {
     }
   })
 
+  it('庭院花草随季节与天气变化：冬无花、雪天压草、雨天打落花瓣', () => {
+    const p = createParams()
+    resolveParams({ hour: 12, season: 'sp', weather: 'clear' }, p)
+    const springBloom = p.bloomLevel
+    const springGrass = p.grassLevel
+    expect(springBloom).toBeGreaterThan(0.9)
+    expect(springGrass).toBeGreaterThan(0.9)
+
+    // 冬季：不开花，草量明显变少（枯草）
+    resolveParams({ hour: 12, season: 'wi', weather: 'clear' }, p)
+    expect(p.bloomLevel).toBe(0)
+    expect(p.grassLevel).toBeLessThan(springGrass * 0.6)
+
+    // 雨天：花瓣被打落，草量不受损（轻度上升）
+    resolveParams({ hour: 12, season: 'sp', weather: 'rain' }, p)
+    expect(p.bloomLevel).toBeLessThan(springBloom * 0.6)
+    expect(p.grassLevel).toBeGreaterThanOrEqual(springGrass)
+
+    // 雪天：花几乎消失、草被压
+    resolveParams({ hour: 12, season: 'su', weather: 'snow' }, p)
+    expect(p.bloomLevel).toBeLessThan(0.2)
+    expect(p.grassLevel).toBeLessThan(0.7)
+  })
+
+  it('四季草色/花色应可区分（春绿、秋暖）', () => {
+    const p = createParams()
+    resolveParams({ hour: 12, season: 'sp', weather: 'clear' }, p)
+    const springGrass = p.grass.clone()
+    resolveParams({ hour: 12, season: 'au', weather: 'clear' }, p)
+    // 秋草偏黄：绿通道相对红通道的比值下降
+    expect(p.grass.g / p.grass.r).toBeLessThan(springGrass.g / springGrass.r)
+    // 春花偏冷（粉），秋花偏暖（橙）
+    resolveParams({ hour: 12, season: 'sp', weather: 'clear' }, p)
+    const springFlower = p.flower.clone()
+    resolveParams({ hour: 12, season: 'au', weather: 'clear' }, p)
+    expect(p.flower.r / p.flower.b).toBeGreaterThan(springFlower.r / springFlower.b)
+  })
+
   it('雾密度应始终落在合理区间', () => {
     const p = createParams()
     for (const season of SEASONS) {

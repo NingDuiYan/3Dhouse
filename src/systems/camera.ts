@@ -1,7 +1,14 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { easeInOutCubic } from '../core/interpolate'
-import { SWEEP_ANGLE, SWEEP_SECS, TOUR_SPEED } from '../config'
+import {
+  CAMERA_MAX_DISTANCE,
+  CAMERA_MIN_DISTANCE,
+  CAMERA_TARGET,
+  SWEEP_ANGLE,
+  SWEEP_SECS,
+  TOUR_SPEED
+} from '../config'
 
 /** 相机系统：OrbitControls 唯一视角真相源 + 换季运镜 + 自动巡游 */
 export interface CameraSystem {
@@ -15,12 +22,12 @@ export interface CameraSystem {
 
 export function createCameraSystem(camera: THREE.PerspectiveCamera, dom: HTMLElement): CameraSystem {
   const controls = new OrbitControls(camera, dom)
-  controls.target.set(0, 1.7, 0)
+  controls.target.set(CAMERA_TARGET.x, CAMERA_TARGET.y, CAMERA_TARGET.z)
   controls.enableDamping = true
   controls.dampingFactor = 0.06
   controls.enablePan = false
-  controls.minDistance = 5
-  controls.maxDistance = 26
+  controls.minDistance = CAMERA_MIN_DISTANCE
+  controls.maxDistance = CAMERA_MAX_DISTANCE
   controls.maxPolarAngle = Math.PI * 0.49
 
   // 减少动态偏好：只在初始化时读一次，不进帧循环

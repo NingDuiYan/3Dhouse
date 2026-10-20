@@ -17,6 +17,19 @@ describe('formatHour 应把 0-24 小时数格式化为 hh:mm', () => {
   it('24 应回绕到 00:00，避免出现 24:00', () => {
     expect(formatHour(24)).toBe('00:00')
   })
+
+  it('滑杆 0.05 步进下每分钟读数都应精确（回归：曾有 37.8% 档位少 1 分钟）', () => {
+    for (let i = 0; i <= 480; i++) {
+      const hour = i * 0.05
+      const total = Math.round(hour * 60) % 1440
+      const want = String(Math.floor(total / 60)).padStart(2, '0') + ':' + String(total % 60).padStart(2, '0')
+      expect(formatHour(hour)).toBe(want)
+    }
+    // 典型浮点截断点：1.15 旧实现为 01:08，2.55 旧实现为 02:32
+    expect(formatHour(1.15)).toBe('01:09')
+    expect(formatHour(2.55)).toBe('02:33')
+    expect(formatHour(23.99)).toBe('23:59')
+  })
 })
 
 describe('timeBand 应把连续时间压成四档色带', () => {

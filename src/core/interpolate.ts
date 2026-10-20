@@ -2,8 +2,12 @@ import * as THREE from 'three'
 import type { ColParam, KeyframeCol, KeyframeNum, NumParam } from '../types'
 
 /** 参数名清单：resolveParams / lerpParams 遍历用 */
-export const NUM_PARAMS: NumParam[] = ['rayleigh', 'sunInt', 'hemiInt', 'fogD', 'exp', 'bloom', 'folScale']
-export const COL_PARAMS: ColParam[] = ['sun', 'hemiSky', 'hemiGround', 'fog', 'foliage', 'ground']
+export const NUM_PARAMS: NumParam[] = [
+  'rayleigh', 'sunInt', 'hemiInt', 'fogD', 'exp', 'bloom', 'folScale', 'grassLevel', 'bloomLevel'
+]
+export const COL_PARAMS: ColParam[] = [
+  'sun', 'hemiSky', 'hemiGround', 'fog', 'foliage', 'ground', 'grass', 'flower'
+]
 
 /**
  * 数值轨道线性插值（track 按锚点时刻升序，首尾为 0/24 夜间锚点）。

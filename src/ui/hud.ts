@@ -15,8 +15,10 @@ export interface Hud {
 
 /** 把小时数格式化为 hh:mm */
 export function formatHour(hour: number): string {
-  const h = Math.floor(hour) % 24
-  const m = Math.floor((hour % 1) * 60)
+  // 先按整分钟四舍五入再拆分：滑杆步进 0.05h 时 Math.floor 会把 1.15 截成 01:08（应为 01:09）
+  const total = Math.round(hour * 60) % (24 * 60)
+  const h = Math.floor(total / 60)
+  const m = total % 60
   return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0')
 }
 
