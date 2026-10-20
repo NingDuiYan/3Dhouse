@@ -3,8 +3,9 @@
    分节：1 tokens / 2 reset 与画布 / 3 加载页 / 4 控制面板 / 5 组件
         6 状态 / 7 响应式 / 8 兼容与动效降级
    零依赖，零每帧写入（--hs-fill 与 html[data-band] 只在交互事件里写）。
-   画面是主角：面板只在底部占一条，本体不描粗边、不堆按钮，选中项用一支
+    画面是主角：面板只在底部占一条，本体不描粗边、不堆按钮，选中项用一支
    时刻色带实心药丸表示——比"八个描边方片"安静，也比反白块收敛。
+   选项区是可收起的抽屉（0fr → 1fr），收起后只留下方的时刻读出条。
    ============================================================ */
 
 /* ---------- 1. Tokens ---------- */
@@ -102,6 +103,7 @@ body {
     620px,
     calc(100vw - 32px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px))
   );
+  display: flex; flex-direction: column;
   padding: 16px 18px 18px;
   background: var(--hs-panel);
   -webkit-backdrop-filter: blur(18px) saturate(120%);
@@ -114,6 +116,12 @@ body {
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
   user-select: none;
   touch-action: manipulation;
+  /* 收起时底色/描边/投影/内边距一起退场，只留把手（见下方 #hud:not(.open)） */
+  transition:
+    padding 340ms var(--hs-ease),
+    background-color 340ms linear,
+    border-color 340ms linear,
+    box-shadow 340ms linear;
 }
 /* 顶边一道极淡的色带光：面板与场景之间的"接缝"，随时刻换色 */
 #hud::before {
@@ -122,10 +130,75 @@ body {
   opacity: 0.34; pointer-events: none;
 }
 
+/* 抽屉把手：展开时骑在面板上沿正中，下半截与面板同底、无下边框，读起来是
+   "从面板长出来的拉手"；收起后面板本体全退掉，它变成一颗独立胶囊浮在底部。 */
+.drawer-toggle {
+  position: absolute; left: 50%; top: -13px;
+  transform: translateX(-50%);
+  display: inline-grid; place-items: center;
+  width: 46px; height: 22px; padding: 0;
+  border: 1px solid var(--hs-divide); border-bottom: 0;
+  border-radius: var(--hs-r-full) var(--hs-r-full) 0 0;
+  background: var(--hs-panel);
+  -webkit-backdrop-filter: blur(18px) saturate(120%);
+  backdrop-filter: blur(18px) saturate(120%);
+  color: var(--hs-text-3);
+  cursor: pointer; touch-action: manipulation;
+  transition: color var(--hs-dur-2) var(--hs-ease), background-color var(--hs-dur-1) ease;
+}
+.drawer-toggle:hover { color: var(--hs-text-1); background: var(--hs-panel-solid); }
+/* 箭头朝上=可展开（把面板往上拉），朝下=可收起 */
+.chevron {
+  width: 6px; height: 6px; margin-top: 4px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(225deg);
+  transition: transform 320ms var(--hs-ease), margin-top 320ms var(--hs-ease);
+}
+.drawer-toggle[aria-expanded='true'] .chevron { transform: rotate(45deg); margin-top: -3px; }
+
+/* 收起态：读出条与选项一起收掉，面板本体（底色/描边/投影/内边距）也退场，
+   屏幕上只剩一颗胶囊按钮；整块 hud 不吃指针事件，收起后不会挡住拖拽旋转。 */
+#hud:not(.open) {
+  pointer-events: none;
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+#hud:not(.open)::before { opacity: 0; }
+#hud:not(.open) .drawer-toggle {
+  top: -11px;
+  pointer-events: auto;
+  border-bottom: 1px solid var(--hs-divide);
+  border-radius: var(--hs-r-full);
+  background: var(--hs-panel);
+}
+#hud:not(.open) .drawer-toggle:hover { background: var(--hs-panel-solid); }
+
+/* 面板主体：收起时 grid 行高收到 0fr（inert 由 hud.ts 切换）。
+   内层必须 overflow:hidden + min-height:0，否则 0fr 时内容仍会溢出显示。 */
+.panel-body {
+  display: grid; grid-template-rows: 1fr;
+  transition: grid-template-rows 340ms var(--hs-ease);
+}
+#hud:not(.open) .panel-body { grid-template-rows: 0fr; }
+.panel-body-inner {
+  display: flex; flex-direction: column;
+  min-height: 0; overflow: hidden;
+}
+
 /* 读出区：左侧 时间大字 + 语境小字（唯一 aria-live 节点），右侧 巡游开关 */
 #readout {
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
   padding-bottom: 14px; border-bottom: 1px solid var(--hs-divide);
+}
+/* 选项区：时刻 / 季节 / 天气 */
+.options {
+  display: flex; flex-direction: column; gap: 12px;
+  margin-top: 14px;
 }
 .readout-main { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 0; }
 #moodTime {
@@ -142,13 +215,12 @@ body {
 
 /* ---------- 5. 组件 ---------- */
 .row { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.row + .row, .halves { margin-top: 12px; }
+/* 行间距交给 .options 的 gap：收起时不会留下残余空隙 */
 /* 季节与天气并排：面板高度从 4 行收到 3 行，别让控件墙吃掉画面 */
 .halves {
   display: grid; grid-template-columns: 1fr 1fr;
   gap: 12px 22px; align-items: center;
 }
-.halves .row + .row { margin-top: 0; }
 
 .rowlabel {
   flex: 0 0 2.4em; text-align: right; white-space: nowrap;
@@ -273,7 +345,8 @@ body {
 .tab:focus-visible,
 .chip:focus-visible,
 #hourSlider:focus-visible,
-#tourBtn:focus-visible {
+#tourBtn:focus-visible,
+#drawerToggle:focus-visible {
   outline: 2px solid var(--hs-focus);
   outline-offset: 2px;
 }
@@ -295,6 +368,7 @@ body {
   }
   /* 季节与天气改成上下两行，避免 320px 视口里四个按钮挤到不可点 */
   .halves { grid-template-columns: 1fr; gap: 10px; }
+  .options { gap: 10px; }
   .rowlabel { flex: 0 0 2.2em; }
   .row { gap: 10px; }
   /* 滑杆独占一行：三个吸附按钮 + 滑杆在 ≤640px 会把滑杆压到 60px 以下 */
@@ -316,11 +390,12 @@ body {
     padding: 8px 12px 10px;
   }
   #readout { padding-bottom: 8px; }
+  .options { gap: 8px; margin-top: 8px; }
+  .drawer-toggle { width: 42px; height: 20px; top: -12px; }
   #moodCtx { letter-spacing: 0.16em; }
   .tour { height: 24px; padding: 0 11px; }
   .seg { padding: 2px; }
-  .halves { grid-template-columns: 1fr 1fr; margin-top: 8px; }
-  .row + .row { margin-top: 8px; }
+  .halves { grid-template-columns: 1fr 1fr; }
   .row { flex-wrap: nowrap; }
   #hourSlider { flex: 1 1 auto; order: 0; margin-top: 0; }
   .seg { flex: 0 0 auto; }

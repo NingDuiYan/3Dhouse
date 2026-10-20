@@ -41,12 +41,28 @@ export function timeBand(hour: number): TimeBand {
   return 'night'
 }
 
-/** 绑定 HUD：时刻滑杆/吸附按钮/季节/天气选项卡/巡游开关/读出行 */
+/** 抽屉开合状态的存储键：刷新后沿用上次选择 */
+const DRAWER_KEY = 'hos:hud-drawer-open'
+
+/**
+ * 解析抽屉偏好的存储值。
+ * 功能：把 localStorage 里的原始字符串转成开合状态，缺省为展开。
+ * 参数：raw 存储值，可为 null（首次访问或存储被禁用）。
+ * 返回：true 展开 / false 收起。
+ */
+export function parseDrawerPref(raw: string | null): boolean {
+  return raw !== '0'
+}
+
+/** 绑定 HUD：时刻滑杆/吸附按钮/季节/天气选项卡/巡游开关/抽屉/读出行 */
 export function createHud(state: TimeState, cb: HudCallbacks): Hud {
   const slider = document.getElementById('hourSlider') as HTMLInputElement
   const moodTime = document.getElementById('moodTime') as HTMLElement
   const moodCtx = document.getElementById('moodCtx') as HTMLElement
   const tourBtn = document.getElementById('tourBtn') as HTMLButtonElement
+  const hud = document.getElementById('hud') as HTMLElement
+  const panelBody = document.getElementById('panelBody') as HTMLElement
+  const drawerToggle = document.getElementById('drawerToggle') as HTMLButtonElement
 
   const seasonBtns = Array.from(document.querySelectorAll<HTMLButtonElement>('.tab[data-season]'))
   const weatherBtns = Array.from(document.querySelectorAll<HTMLButtonElement>('.tab[data-weather]'))
@@ -86,6 +102,27 @@ export function createHud(state: TimeState, cb: HudCallbacks): Hud {
     const on = tourBtn.getAttribute('aria-pressed') !== 'true'
     tourBtn.setAttribute('aria-pressed', String(on))
     cb.onTourToggle(on)
+  })
+
+  /**
+   * 面板开合：只切面板 class 与 aria 状态，不进帧循环。
+   * 收起时给内容挂 inert——键盘 Tab 不会再走进去看不见的选项。
+   */
+  function setPanelOpen(open: boolean): void {
+    hud.classList.toggle('open', open)
+    drawerToggle.setAttribute('aria-expanded', String(open))
+    if (open) panelBody.removeAttribute('inert')
+    else panelBody.setAttribute('inert', '')
+  }
+
+  drawerToggle.addEventListener('click', () => {
+    const open = drawerToggle.getAttribute('aria-expanded') !== 'true'
+    setPanelOpen(open)
+    try {
+      localStorage.setItem(DRAWER_KEY, open ? '1' : '0')
+    } catch {
+      // 隐私模式禁用存储时只影响"记住选择"，不影响开合本身
+    }
   })
 
   /** 同步滑杆值、无障碍朗读值、轨道进度变量、时刻色带（仅交互期调用） */
@@ -144,6 +181,15 @@ export function createHud(state: TimeState, cb: HudCallbacks): Hud {
     }
     refreshReadout()
   }
+
+  // 首帧：沿用上次的抽屉选择（默认展开）；存储不可用时退回默认值
+  let savedPref: string | null = null
+  try {
+    savedPref = localStorage.getItem(DRAWER_KEY)
+  } catch {
+    savedPref = null
+  }
+  setPanelOpen(parseDrawerPref(savedPref))
 
   refresh()
   return { refresh }

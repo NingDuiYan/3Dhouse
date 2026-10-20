@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatHour, timeBand } from '../src/ui/hud'
+import { formatHour, parseDrawerPref, timeBand } from '../src/ui/hud'
 
 describe('formatHour 应把 0-24 小时数格式化为 hh:mm', () => {
   it('整点应补零到两位', () => {
@@ -29,6 +29,18 @@ describe('formatHour 应把 0-24 小时数格式化为 hh:mm', () => {
     expect(formatHour(1.15)).toBe('01:09')
     expect(formatHour(2.55)).toBe('02:33')
     expect(formatHour(23.99)).toBe('23:59')
+  })
+})
+
+describe('parseDrawerPref 应记住抽屉开合状态', () => {
+  it('首次访问（无存储值）默认展开', () => {
+    expect(parseDrawerPref(null)).toBe(true)
+  })
+
+  it('存过收起则保持收起，其余值一律展开', () => {
+    expect(parseDrawerPref('0')).toBe(false)
+    expect(parseDrawerPref('1')).toBe(true)
+    expect(parseDrawerPref('')).toBe(true)
   })
 })
 
