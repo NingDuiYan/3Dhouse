@@ -22,8 +22,10 @@ export interface Textures {
   grass: SurfaceTex
   bark: SurfaceTex
   snow: SurfaceTex
-  /** 叶片卡片（含 alpha）：用于写实树冠的交叉面片 */
+  /** 叶团卡片（含 alpha）：一整团叶子而非单片分散的叶子，树冠靠多张咬合成体积 */
   leaf: THREE.CanvasTexture
+  /** 针叶枝簇卡片（含 alpha）：一根下垂枝条上密集的针叶，用于针叶树分层枝冠 */
+  needle: THREE.CanvasTexture
   dot: THREE.CanvasTexture
   rain: THREE.CanvasTexture
   cloud: THREE.CanvasTexture
@@ -637,7 +639,8 @@ export function createTextures(): Textures {
     grass,
     bark,
     snow,
-    leaf: makeLeaf(),
+    leaf: makeLeafCluster(),
+    needle: makeNeedleSpray(),
     dot: makeTexture(64, (g, s) => {
       const grad = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2)
       grad.addColorStop(0, 'rgba(255,255,255,1)')
@@ -658,31 +661,130 @@ export function createTextures(): Textures {
   }
 }
 
-/** 叶片卡片：白底 alpha 的簇状叶 silhouette（材质 color 决定季节色） */
-function makeLeaf(): THREE.CanvasTexture {
+/**
+ * 功能：画一片带尖头的叶子（叶身 + 中脉阴影），坐标为贴图像素。
+ * 参数：g 2D 上下文；x/y 叶心；len 叶长；wid 叶宽；angle 朝向；grey 明度（0.45~1）。
+ */
+function drawLeaf(g: Ctx, x: number, y: number, len: number, wid: number, angle: number, grey: number): void {
+  const v = Math.round(grey * 255)
+  g.save()
+  g.translate(x, y)
+  g.rotate(angle)
+  g.beginPath()
+  g.moveTo(0, -len * 0.5)
+  g.quadraticCurveTo(wid, -len * 0.08, 0, len * 0.5)
+  g.quadraticCurveTo(-wid, -len * 0.08, 0, -len * 0.5)
+  g.fillStyle = 'rgb(' + v + ',' + v + ',' + v + ')'
+  g.fill()
+  g.restore()
+}
+
+/**
+ * 叶团卡片：一整团密集咬合的叶子（内部留少量透光缝，边缘参差），
+ * 材质 color 决定季节色，贴图只提供形状与明暗层次。
+ * 关键点：不能画成均匀散布的孤立叶片 —— 那样每张卡片都像绿色碎纸，越看越假。
+ */
+function makeLeafCluster(): THREE.CanvasTexture {
   const size = 256
   const { c, g } = canvasOf(size)
   g.clearRect(0, 0, size, size)
   const rand = makeRand(101)
-  g.fillStyle = '#ffffff'
-  for (let i = 0; i < 90; i++) {
-    const cx = size * (0.15 + rand() * 0.7)
-    const cy = size * (0.15 + rand() * 0.7)
-    const rx = 5 + rand() * 9
-    const ry = 3 + rand() * 5
-    g.globalAlpha = 0.75 + rand() * 0.25
-    g.save()
-    g.translate(cx, cy)
-    g.rotate(rand() * Math.PI)
-    g.beginPath()
-    g.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2)
-    g.fill()
-    g.restore()
+  // 3 个互相错开的团心：轮廓天然不规则，不会读成一个圆盘
+  const blobs = [
+    { x: size * 0.42, y: size * 0.46, r: size * 0.3 },
+    { x: size * 0.64, y: size * 0.36, r: size * 0.22 },
+    { x: size * 0.58, y: size * 0.64, r: size * 0.24 }
+  ]
+  for (const b of blobs) {
+    const leaves = 320
+    for (let i = 0; i < leaves; i++) {
+      // 高斯落位：中心密、外缘疏，边缘自然稀疏到只剩几片叶
+      const u = (rand() + rand() + rand() - 1.5) / 1.5
+      const v = (rand() + rand() + rand() - 1.5) / 1.5
+      const x = b.x + u * b.r * 1.25
+      const y = b.y + v * b.r * 1.25
+      if (x < 2 || x > size - 2 || y < 2 || y > size - 2) continue
+      const dist = Math.hypot(x - b.x, y - b.y) / b.r
+      // 外缘叶子更小：轮廓收尖，避免"齐边贴片"
+      const shrink = dist > 1 ? 0.55 : 1
+      const len = (9 + rand() * 8) * shrink
+      const wid = len * (0.3 + rand() * 0.14)
+      // 明度随离团心距离加亮（模拟内部阴影），叶间再随机抖动
+      const grey = 0.52 + Math.min(dist, 1.4) * 0.3 + rand() * 0.18
+      drawLeaf(g, x, y, len, wid, rand() * Math.PI * 2, Math.min(grey, 1))
+    }
   }
-  g.globalAlpha = 1
   const t = new THREE.CanvasTexture(c)
   t.colorSpace = THREE.SRGBColorSpace
   t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping
+  t.anisotropy = 4
+  disableMips(t)
+  return t
+}
+
+/**
+ * 功能：关掉贴图的 mipmap，改用线性缩小采样。
+ * 原因：叶团是 alphaTest 镂空卡片，缩到后面几级 mip 时半透明像素被平均，
+ * 整张卡的 alpha 均值会越过 alphaTest 阈值 —— 于是要么整块四边形显形成"大方块"，
+ * 要么整张卡被丢弃（树冠忽然变稀）。这类贴图不能走 mip 链。
+ * 参数：t 目标贴图。
+ * 返回：无（原地修改）。
+ */
+function disableMips(t: THREE.CanvasTexture): void {
+  t.generateMipmaps = false
+  t.minFilter = THREE.LinearFilter
+  t.magFilter = THREE.LinearFilter
+}
+
+/**
+ * 针叶枝簇卡片：一根自下而上渐细的枝条，两侧密排下垂的针叶，
+ * 末端收尖。卡片按层径向排布时，读起来是"一圈枝条"而不是"塑料锥面"。
+ */
+function makeNeedleSpray(): THREE.CanvasTexture {
+  const size = 256
+  const { c, g } = canvasOf(size)
+  g.clearRect(0, 0, size, size)
+  const rand = makeRand(131)
+  const cx = size * 0.5
+  const top = size * 0.06
+  const bottom = size * 0.94
+  // 主枝：下粗上细，略带弯曲
+  g.strokeStyle = 'rgb(120,120,120)'
+  g.lineCap = 'round'
+  for (let i = 0; i < 26; i++) {
+    const t0 = i / 26
+    const t1 = (i + 1) / 26
+    const y0 = bottom + (top - bottom) * t0
+    const y1 = bottom + (top - bottom) * t1
+    const x0 = cx + Math.sin(t0 * 2.2) * size * 0.02
+    const x1 = cx + Math.sin(t1 * 2.2) * size * 0.02
+    g.lineWidth = 4.2 * (1 - t0 * 0.72)
+    g.beginPath()
+    g.moveTo(x0, y0)
+    g.lineTo(x1, y1)
+    g.stroke()
+  }
+  // 针叶：沿枝条两侧成对斜生，越靠上越短（枝梢收尖）
+  const pairs = 34
+  for (let i = 0; i < pairs; i++) {
+    const t = i / pairs
+    const y = bottom + (top - bottom) * t
+    const x = cx + Math.sin(t * 2.2) * size * 0.02
+    const len = size * (0.34 - t * 0.24) * (0.82 + rand() * 0.4)
+    const grey = 0.6 + rand() * 0.4
+    for (const side of [-1, 1]) {
+      // 针叶下垂：起点在枝上，末端向下外侧伸，夹角约 35°
+      drawLeaf(g, x + side * len * 0.36, y + len * 0.30, len, len * 0.1, side * (0.95 + rand() * 0.3), grey)
+      if (rand() < 0.55) {
+        drawLeaf(g, x + side * len * 0.2, y + len * 0.5, len * 0.8, len * 0.085, side * (1.15 + rand() * 0.3), grey * 0.92)
+      }
+    }
+  }
+  const t = new THREE.CanvasTexture(c)
+  t.colorSpace = THREE.SRGBColorSpace
+  t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping
+  t.anisotropy = 4
+  disableMips(t)
   return t
 }
 

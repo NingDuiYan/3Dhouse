@@ -31,20 +31,20 @@ function mergeParts(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
   return merged
 }
 
-/** 叶卡边长相对冠幅半径的比例：单卡取小、靠数量咬合出叶团，避免秋景出现"大片棕椭圆" */
-const CARD_SPAN = 0.81
-/** 叶卡沿垂直方向的收缩比：树冠横向比纵向更宽 */
+/** 叶团卡片沿垂直方向的收缩比：树冠横向比纵向更宽 */
 const CARD_SQUASH_Y = 0.72
-/** 叶卡数量：阔叶 16 片、针叶 10 片（5 层 × 2 片）—— 尺寸×0.6 后靠数量补回密度 */
-const BROADLEAF_CARDS = 16
-const CONIFER_CARDS = 10
-/** 针叶冠分层数 / 每层径向分段：分段 ≥20 近景才看不出"多棱锥"的直棱 */
-const CONIFER_LAYERS = 7
-const CONIFER_SEGS = 22
-/** 灌木叶团卡片数（比树冠少，但仍要够密才不成"几片刮片"） */
-const BUSH_CARDS = 9
+/** 阔叶树冠：外圈叶团数 / 内层叶团数（内层压暗，模拟冠内不见天光） */
+const BROADLEAF_BLOBS = 64
+const BROADLEAF_INNER = 26
+/** 灌木叶团数（小体量，够密就行） */
+const BUSH_BLOBS = 20
+/** 针叶：冠层数 / 每层枝条数（枝条卡片沿周向排布，替代整块锥面） */
+const CONIFER_LAYERS = 9
+const CONIFER_SPRAYS = 9
+/** 针叶冠内芯锥的径向分段：只当"挡光的深色芯"，轮廓由枝条决定 */
+const CONIFER_CORE_SEGS = 8
 /** 阔叶树冠中心相对树高的比例：树冠落在上部，主干下部露出来 */
-const BROADLEAF_CROWN_Y = 0.72
+const BROADLEAF_CROWN_Y = 0.64
 /** 针叶树冠起点相对树高的比例：下段露干，视觉上更接近冷杉/云杉 */
 const CONIFER_CROWN_Y = 0.26
 /** 分枝级数：阔叶 3 级、针叶 2 级（针叶枝大部分被锥冠遮住，不必过密） */
@@ -160,107 +160,138 @@ function growBranch(
 }
 
 /**
- * 功能：生成阔叶树冠——若干张随机朝向的叶片卡片，铺满一个扁球体（十字/三向交叉的团簇）。
- * 参数：radius 冠幅半径；count 卡片数；seed 形态种子；squashY 垂直收缩比。
- * 返回：以树冠中心为原点的卡片几何（多片已合并）。
+ * 功能：给一张卡片的所有顶点刷同一种明度（顶点色，材质 color 再乘季节色）。
+ * 参数：geo 卡片几何；shade 明度 0..1。
  */
-function broadleafCardsGeo(radius: number, count: number, seed: number, squashY: number): THREE.BufferGeometry {
-  const parts: THREE.BufferGeometry[] = []
-  for (let i = 0; i < count; i++) {
-    const s = seed + i * 19
-    const w = radius * CARD_SPAN * (0.78 + rand(s) * 0.44)
-    const h = radius * CARD_SPAN * squashY * (0.78 + rand(s + 1) * 0.44)
-    const geo = new THREE.PlaneGeometry(w, h, 1, 1)
-    // 随机朝向：绕 y 一周、再绕 z/x 小角度倾斜，避免全部立成"广告牌"
-    geo.rotateZ((rand(s + 2) - 0.5) * 0.8)
-    geo.rotateX((rand(s + 3) - 0.5) * 0.5)
-    geo.rotateY(rand(s + 4) * Math.PI * 2)
-    // 扁球内随机落位（赤道更宽、垂直压扁）：卡片变小后落位反而要更靠外，才铺满整个冠体
-    const r = radius * (0.16 + rand(s + 5) * 0.8)
-    const theta = rand(s + 6) * Math.PI * 2
-    const phi = Math.acos(2 * rand(s + 7) - 1)
-    const sinPhi = Math.sin(phi)
-    geo.translate(Math.cos(theta) * sinPhi * r, Math.cos(phi) * r * squashY, Math.sin(theta) * sinPhi * r)
-    parts.push(geo)
+function paintCard(geo: THREE.BufferGeometry, shade: number): void {
+  const n = geo.attributes.position.count
+  const colors = new Float32Array(n * 3)
+  for (let i = 0; i < n; i++) {
+    colors[i * 3] = shade
+    colors[i * 3 + 1] = shade
+    colors[i * 3 + 2] = shade
   }
-  return mergeParts(parts)
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
 }
 
 /**
- * 功能：生成针叶树冠的叶卡"枝簇"——沿锥面分 3 层、每层 2 片近乎水平的卡片，模拟下垂枝叶。
- * 参数：h 树高；r 冠幅半径；baseY 冠底高度（树冠组原点）；seed 形态种子。
- * 返回：相对冠底原点（y=0）的卡片几何。
+ * 功能：往 out 里塞一组"十字卡片"（两片正交平面，绕自身法向随机翻滚），
+ *       单张平面在别的角度看会薄成一条线，正交双片才有体积。
+ * 参数：out 收集；w/h 卡片宽高；seed 形态种子；shade 顶点色明度。
  */
-function coniferCardsGeo(h: number, r: number, baseY: number, seed: number): THREE.BufferGeometry {
+function pushCrossCard(
+  out: THREE.BufferGeometry[],
+  w: number,
+  h: number,
+  seed: number,
+  shade: number
+): void {
+  for (let k = 0; k < 2; k++) {
+    const geo = new THREE.PlaneGeometry(w, h, 1, 1)
+    geo.rotateY((k * Math.PI) / 2)
+    geo.rotateZ((rand(seed + k * 3) - 0.5) * 0.7)
+    geo.rotateX((rand(seed + 1 + k * 3) - 0.5) * 0.45)
+    geo.rotateY(rand(seed + 2 + k * 3) * Math.PI)
+    paintCard(geo, shade)
+    out.push(geo)
+  }
+}
+
+/**
+ * 功能：生成阔叶树冠——外圈叶团铺满扁球壳、内层叶团压暗堵住透光，
+ *       每个叶团是一对正交卡片，靠数量与明度差咬合出"蓬松的团"而不是漂浮碎叶。
+ * 参数：radius 冠幅半径；count 外圈叶团数；inner 内层叶团数；seed 形态种子；squashY 垂直收缩比。
+ * 返回：以树冠中心为原点的合并几何。
+ */
+function broadleafCrownGeo(
+  radius: number,
+  count: number,
+  inner: number,
+  seed: number,
+  squashY: number
+): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = []
-  const span = h - baseY
-  const layers = CONIFER_CARDS / 2
-  for (let i = 0; i < layers; i++) {
-    const t = 0.16 + (i / Math.max(layers - 1, 1)) * 0.54
-    const y = span * t
-    const rr = r * (1 - t * 0.66)
-    for (let k = 0; k < 2; k++) {
-      const s = seed + i * 23 + k * 7
-      const az = rand(s + 1) * Math.PI * 2 + k * Math.PI
-      // 尺寸 = 原来的 0.6 倍（1.9→1.14、1.05→0.63），靠 CONIFER_CARDS 加倍补回覆盖
-      const geo = new THREE.PlaneGeometry(rr * 1.14, rr * 0.63, 1, 1)
-      // 接近水平、外端略下垂，再绕树轴错开相位
-      geo.rotateX(-Math.PI / 2 + 0.42 + rand(s) * 0.3)
-      geo.rotateY(az)
-      // 卡片中心推到锥面附近：叶片从锥体边缘探出来，轮廓有"枝叶"而非一刀切的锥面
-      geo.translate(Math.cos(az) * rr * 0.5, y, Math.sin(az) * rr * 0.5)
-      parts.push(geo)
+
+  // 外圈：落在 0.55~1.0 半径的壳上，朝外略微错开，形成参差的冠缘
+  for (let i = 0; i < count; i++) {
+    const s = seed + i * 19
+    const theta = rand(s + 6) * Math.PI * 2
+    const phi = Math.acos(2 * rand(s + 7) - 1)
+    const r = radius * (0.55 + rand(s + 5) * 0.45)
+    const sinPhi = Math.sin(phi)
+    const size = radius * (0.46 + rand(s + 8) * 0.34)
+    const geo: THREE.BufferGeometry[] = []
+    pushCrossCard(geo, size, size * (0.86 + rand(s + 9) * 0.24), s, 0.74 + rand(s + 10) * 0.26)
+    for (const g of geo) {
+      g.translate(Math.cos(theta) * sinPhi * r, Math.cos(phi) * r * squashY, Math.sin(theta) * sinPhi * r)
+      parts.push(g)
+    }
+  }
+
+  // 内层：更小的叶团落在冠心附近并整体压暗，从任何角度看都是"实心"的树冠
+  for (let i = 0; i < inner; i++) {
+    const s = seed + 701 + i * 23
+    const theta = rand(s + 6) * Math.PI * 2
+    const phi = Math.acos(2 * rand(s + 7) - 1)
+    const r = radius * (0.08 + rand(s + 5) * 0.4)
+    const sinPhi = Math.sin(phi)
+    const size = radius * (0.5 + rand(s + 8) * 0.3)
+    const geo: THREE.BufferGeometry[] = []
+    pushCrossCard(geo, size, size * 0.9, s, 0.42 + rand(s + 9) * 0.18)
+    for (const g of geo) {
+      g.translate(Math.cos(theta) * sinPhi * r, Math.cos(phi) * r * squashY, Math.sin(theta) * sinPhi * r)
+      parts.push(g)
     }
   }
   return mergeParts(parts)
 }
 
 /**
- * 功能：生成针叶树冠——多层锥体自下而上逐层收小并轻微错位，形成分层的锥形轮廓。
- * 参数：h 树高；r 冠幅半径；baseY 冠底高度；seed 形态种子。
- * 返回：相对冠底原点（y=0）的锥冠几何。
+ * 功能：生成针叶树冠的枝条层——每层沿周向排一圈"下垂枝簇"卡片（十字双片），
+ *       层自下而上收小，轮廓由枝条端部决定，不再是一整块连续锥面。
+ * 参数：span 冠高；r 冠底半径；seed 形态种子。
+ * 返回：相对冠底原点（y=0）的合并几何。
  */
-function coniferCrownGeo(h: number, r: number, baseY: number, seed: number): THREE.BufferGeometry {
+function coniferSpraysGeo(span: number, r: number, seed: number): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = []
-  const span = h - baseY
   for (let i = 0; i < CONIFER_LAYERS; i++) {
     const t = i / (CONIFER_LAYERS - 1)
     const s = seed + i * 17
-    // 层高 > 层距：上下层交叠约 1/3，轮廓连续；半径/高度带确定性抖动，破掉"标准圆锥"
-    const hh = span * (0.36 - t * 0.11) * (0.9 + rand(s + 7) * 0.22)
-    const y = span * t * 0.68 + hh * (0.06 + rand(s + 8) * 0.08)
-    const rr = r * (1 - t * 0.6) * (0.88 + rand(s + 9) * 0.24)
-    // openEnded=true：不要锥底封盖 —— 那圈封盖就是"金字塔分层"最刺眼的水平切边
-    const geo = new THREE.ConeGeometry(rr, hh, CONIFER_SEGS, 1, true)
-    const pos = geo.attributes.position as THREE.BufferAttribute
-    const ph1 = rand(s) * Math.PI * 2
-    const ph2 = rand(s + 1) * Math.PI * 2
-    for (let v = 0; v < pos.count; v++) {
-      const px = pos.getX(v)
-      const pz = pos.getZ(v)
-      const py = pos.getY(v)
-      // 锥尖是重合顶点，不参与抖动
-      if (px * px + pz * pz < 1e-6) continue
-      const a = Math.atan2(pz, px)
-      // 两个不同频率的正弦叠成不对称轮廓（逐点纯随机会抖成"炸毛"，不像针叶）
-      const wob = 1 + 0.1 * Math.sin(a * 3 + ph1) + 0.055 * Math.sin(a * 7 + ph2)
-      pos.setX(v, px * wob)
-      pos.setZ(v, pz * wob)
-      // 枝梢下垂：底缘顶点按角度多垂一点，下缘是"穗状"而不是一圈平齐
-      if (py < 0) pos.setY(v, py - hh * 0.14 * (0.5 + 0.5 * Math.sin(a * 9 + ph1)))
+    const y = span * (0.03 + t * 0.9) * (0.95 + rand(s + 8) * 0.1)
+    const rr = r * (1 - t * 0.84) * (0.9 + rand(s + 9) * 0.2)
+    // 底层更暗（被上层遮光），顶层最亮
+    const shade = 0.6 + t * 0.28 + rand(s + 10) * 0.1
+    const sprays = CONIFER_SPRAYS - (t > 0.75 ? 2 : 0)
+    for (let k = 0; k < sprays; k++) {
+      const ss = s + k * 13
+      const az = rand(ss) * Math.PI * 2 + (k / sprays) * Math.PI * 2
+      // 枝条：外端下垂，宽度略大于层半径的半径，让相邻枝交叠
+      const len = rr * (1.15 + rand(ss + 1) * 0.35)
+      const wid = len * 0.62
+      const card: THREE.BufferGeometry[] = []
+      pushCrossCard(card, len, wid, ss + 3, shade)
+      for (const g of card) {
+        // 先压成近水平并下垂（绕 x 转 -90°+下垂角），再绕树轴转到方位角
+        g.rotateX(-Math.PI / 2 + 0.5 + rand(ss + 2) * 0.25)
+        g.rotateY(az)
+        g.translate(Math.cos(az) * rr * 0.42, y - len * 0.12, Math.sin(az) * rr * 0.42)
+        parts.push(g)
+      }
     }
-    // 每层轻微不同方向的倾斜：整株不再是一根轴线上的对称锥
-    geo.rotateX((rand(s + 2) - 0.5) * 0.07)
-    geo.rotateZ((rand(s + 3) - 0.5) * 0.07)
-    geo.rotateY(rand(s + 4) * Math.PI * 2)
-    geo.translate(
-      (rand(s + 5) - 0.5) * 0.06 * r,
-      y + hh * 0.5,
-      (rand(s + 6) - 0.5) * 0.06 * r
-    )
-    parts.push(geo)
   }
   return mergeParts(parts)
+}
+
+/**
+ * 功能：生成针叶冠的深色内芯——一个细长开口锥，站在枝条后面挡光，
+ *       让树冠"不透"，但轮廓完全交给枝条卡片。
+ * 参数：span 冠高；r 冠底半径。
+ * 返回：相对冠底原点（y=0）的锥几何。
+ */
+function coniferCoreGeo(span: number, r: number): THREE.BufferGeometry {
+  const geo = new THREE.ConeGeometry(r * 0.42, span * 0.94, CONIFER_CORE_SEGS, 1, true)
+  geo.translate(0, span * 0.47, 0)
+  return geo
 }
 
 /**
@@ -272,8 +303,9 @@ export function createVegetation(scene: THREE.Scene, tex: Textures): VegetationS
   // —— 共享材质：叶片卡片 / 灌木 / 针叶 / 树干 / 远景 ——
   const leafMat = new THREE.MeshStandardMaterial({
     map: tex.leaf,
-    alphaTest: 0.5,
+    alphaTest: 0.35,
     side: THREE.DoubleSide,
+    vertexColors: true,
     roughness: 0.9,
     metalness: 0,
     envMapIntensity: 0.3
@@ -282,22 +314,40 @@ export function createVegetation(scene: THREE.Scene, tex: Textures): VegetationS
   const cardDepthMat = new THREE.MeshDepthMaterial({
     depthPacking: THREE.RGBADepthPacking,
     map: tex.leaf,
-    alphaTest: 0.5,
+    alphaTest: 0.35,
     side: THREE.DoubleSide
   })
   const bushMat = new THREE.MeshStandardMaterial({
     map: tex.leaf,
-    alphaTest: 0.5,
+    alphaTest: 0.35,
     side: THREE.DoubleSide,
+    vertexColors: true,
     roughness: 0.92,
     metalness: 0,
     envMapIntensity: 0.25
   })
+  // 针叶枝条卡片：贴图是"一根下垂枝上密排针叶"，明暗由顶点色给出层次
   const needleMat = new THREE.MeshStandardMaterial({
+    map: tex.needle,
+    alphaTest: 0.35,
+    side: THREE.DoubleSide,
+    vertexColors: true,
     roughness: 0.95,
     metalness: 0,
-    envMapIntensity: 0.28,
-    flatShading: true
+    envMapIntensity: 0.26
+  })
+  const needleDepthMat = new THREE.MeshDepthMaterial({
+    depthPacking: THREE.RGBADepthPacking,
+    map: tex.needle,
+    alphaTest: 0.35,
+    side: THREE.DoubleSide
+  })
+  // 内芯：只负责挡光，颜色压得很暗，避免从枝条缝隙看穿树冠
+  const coniferCoreMat = new THREE.MeshStandardMaterial({
+    color: 0x24301f,
+    roughness: 0.98,
+    metalness: 0,
+    envMapIntensity: 0.1
   })
   // 树皮：树干沿高 3 次平铺（沟槽约 0.7m 一段），分枝按 1 次平铺
   const trunkMat = new THREE.MeshStandardMaterial({
@@ -336,7 +386,8 @@ export function createVegetation(scene: THREE.Scene, tex: Textures): VegetationS
 
     const rBase = 0.055 + spec.h * 0.022
     // 树干：阔叶留到树冠内部即可，针叶贯穿全高（下半段是主要可见部分）
-    const trunkH = spec.h * (isConifer ? 0.95 : 0.9)
+    // 阔叶树干只升到树冠中下部：再往上由分枝接管，避免一根"旗杆"穿过冠心
+    const trunkH = spec.h * (isConifer ? 0.95 : 0.72)
     const trunk = trunkGeo(trunkH, rBase, spec.seed)
     const treeMatrix = new THREE.Matrix4().compose(
       new THREE.Vector3(spec.x, 0, spec.z),
@@ -348,7 +399,7 @@ export function createVegetation(scene: THREE.Scene, tex: Textures): VegetationS
 
     // 分枝：从树干上段向四周伸出，2~3 级（阔叶 3 级更繁密）
     const levels = isConifer ? CONIFER_BRANCH_LEVELS : BROADLEAF_BRANCH_LEVELS
-    const branchFrom = trunkH * (isConifer ? 0.55 : 0.58)
+    const branchFrom = trunkH * (isConifer ? 0.55 : 0.5)
     const limbCount = isConifer ? 5 : 6
     const local: THREE.BufferGeometry[] = []
     for (let i = 0; i < limbCount; i++) {
@@ -358,7 +409,8 @@ export function createVegetation(scene: THREE.Scene, tex: Textures): VegetationS
       const dir = new THREE.Vector3(Math.cos(az) * Math.sin(tilt), Math.cos(tilt), Math.sin(az) * Math.sin(tilt))
       // 起点与长度都收紧：叶卡缩小后，露在冠外的裸枝会比以前更扎眼（枝梢不出冠顶）
       const start = new THREE.Vector3(0, branchFrom + rand(s + 2) * trunkH * (isConifer ? 0.14 : 0.16), 0)
-      const len = spec.crown * (isConifer ? 0.3 + rand(s + 3) * 0.16 : 0.34 + rand(s + 3) * 0.22)
+      // 分枝长度收到冠幅之内：三级分叉累加后仍不戳出冠顶
+      const len = spec.crown * (isConifer ? 0.3 + rand(s + 3) * 0.16 : 0.26 + rand(s + 3) * 0.14)
       growBranch(local, start, dir, len, rBase * 0.34, levels - 1, s + 7)
     }
     for (const g of local) {
@@ -369,29 +421,29 @@ export function createVegetation(scene: THREE.Scene, tex: Textures): VegetationS
     // 树冠：独立成组，folScale 只缩放它（不破坏整棵树的个体比例与树干）
     if (isConifer) {
       const baseY = spec.h * CONIFER_CROWN_Y
+      const span = spec.h - baseY
       const crown = new THREE.Group()
       crown.position.y = baseY
-      const cone = new THREE.Mesh(coniferCrownGeo(spec.h, spec.crown, baseY, spec.seed), needleMat)
-      cone.castShadow = true
-      cone.receiveShadow = true
-      crown.add(cone)
-      const cards = new THREE.Mesh(coniferCardsGeo(spec.h, spec.crown, baseY, spec.seed), leafMat)
-      cards.castShadow = true
-      cards.customDepthMaterial = cardDepthMat
-      crown.add(cards)
+      const core = new THREE.Mesh(coniferCoreGeo(span, spec.crown), coniferCoreMat)
+      core.receiveShadow = true
+      crown.add(core)
+      const sprays = new THREE.Mesh(coniferSpraysGeo(span, spec.crown, spec.seed), needleMat)
+      sprays.castShadow = true
+      sprays.customDepthMaterial = needleDepthMat
+      crown.add(sprays)
       tree.add(crown)
       crownGroups.push(crown)
     } else {
       const crownY = spec.h * BROADLEAF_CROWN_Y
       const crown = new THREE.Group()
       crown.position.y = crownY
-      const cards = new THREE.Mesh(
-        broadleafCardsGeo(spec.crown, BROADLEAF_CARDS, spec.seed, CARD_SQUASH_Y),
+      const blobs = new THREE.Mesh(
+        broadleafCrownGeo(spec.crown, BROADLEAF_BLOBS, BROADLEAF_INNER, spec.seed, CARD_SQUASH_Y),
         leafMat
       )
-      cards.castShadow = true
-      cards.customDepthMaterial = cardDepthMat
-      crown.add(cards)
+      blobs.castShadow = true
+      blobs.customDepthMaterial = cardDepthMat
+      crown.add(blobs)
       tree.add(crown)
       crownGroups.push(crown)
     }
@@ -417,10 +469,13 @@ export function createVegetation(scene: THREE.Scene, tex: Textures): VegetationS
     // 组原点抬到灌木中心：folScale 收缩时向团心收，不会"陷进地里"
     crown.position.y = 0.42
     holder.add(crown)
-    const cards = new THREE.Mesh(broadleafCardsGeo(0.62, BUSH_CARDS, 401 + i * 17, 0.62), bushMat)
-    cards.castShadow = true
-    cards.customDepthMaterial = cardDepthMat
-    crown.add(cards)
+    const blobs = new THREE.Mesh(
+      broadleafCrownGeo(0.62, BUSH_BLOBS, 6, 401 + i * 17, 0.72),
+      bushMat
+    )
+    blobs.castShadow = true
+    blobs.customDepthMaterial = cardDepthMat
+    crown.add(blobs)
     scene.add(holder)
     crownGroups.push(crown)
   }

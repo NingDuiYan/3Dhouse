@@ -212,4 +212,7 @@ sky.apply(cur)
 sky.bakeNow()
 
 hud.refresh()
+// DEBUG-TEMP: 排查树冠卡片显形，暴露场景与相机（排查完删除）
+;(window as unknown as Record<string, unknown>).__dbg = { scene, camera, renderer, THREE }
+
 loop.start()
