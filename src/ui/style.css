@@ -1,0 +1,431 @@
+/* ============================================================
+   四时之屋 · HUD 视觉层
+   分节：1 tokens / 2 reset 与画布 / 3 加载遮罩 / 4 品牌 / 5 HUD 面板
+        6 组件 / 7 状态 / 8 响应式 / 9 兼容与动效降级
+   改造范围仅 HUD 观感层：index.html 结构 + 本文件 + ui/hud.ts。
+   零依赖，零每帧写入（--hs-fill 与 html[data-band] 只在交互事件里写）。
+   ============================================================ */
+
+/* ---------- 1. Tokens ---------- */
+:root {
+  /* 墨色底板：与场景夜空同源，保证面板在任何场景亮度下都是"暗场上的玻璃" */
+  --hs-ink-900: #0b0e14;
+
+  /* 文字三级：对 α0.86 面板实测 ≥4.6:1（含纯白雪地最坏底） */
+  --hs-text-1: #f2f4f8;
+  --hs-text-2: #c3cad8;
+  --hs-text-3: #98a2b4;
+
+  /* 时刻色带：四档全部取自场景自身光源（晨光/正午/暮色灯火/月夜），实测 ≥8:1 */
+  --hs-band-dawn: #f0c9a8;
+  /* day 档取正午天光蓝：原 #f2f4f8 与正文 text-1 同色，任何状态下都分不出来。
+     四档统一改由"选中指示条"承担可辨性（见第 7 节），本值只负责色相。 */
+  --hs-band-day: #9ecbff;
+  --hs-band-dusk: #ffc97e;
+  --hs-band-night: #c8d6ea;
+  --hs-accent: var(--hs-band-dusk);
+
+  /* 材质 */
+  /* 品牌标题色与焦点环：原先散落在规则里作为字面量 */
+  --hs-brand-ink: #f4f1e8;
+  --hs-focus: #8ecbff;
+
+  --hs-panel: rgba(11, 14, 20, 0.86);
+  --hs-panel-solid: #11141b;
+  --hs-hairline: rgba(255, 255, 255, 0.46);
+  /* 面板描边：随季节换色温，是 HUD 唯一与四季发生关系的非文字维度 */
+  --hs-edge: rgba(255, 255, 255, 0.10);
+  --hs-fill-rest: rgba(255, 255, 255, 0.06);
+  --hs-fill-hover: rgba(255, 255, 255, 0.11);
+  --hs-fill-press: rgba(255, 255, 255, 0.16);
+
+  /* 滑杆轨道进度：由 hud.ts 在 input 事件写入，这里给首帧默认值 */
+  --hs-fill: 0%;
+
+  /* 尺寸：4px 网格 */
+  --hs-r-md: 10px;
+  --hs-r-lg: 16px;
+  --hs-r-full: 999px;
+  --hs-ctl-h: 34px;
+  --hs-ctl-min-w: 44px;
+  --hs-row-gap: 10px;
+  --hs-hit: 5px;
+
+  /* 字阶：收敛到 4 档 */
+  --hs-fs-brand: 26px;
+  --hs-fs-time: 20px;
+  --hs-fs-ctl: 14px;
+  --hs-fs-label: 12px;
+
+  /* 动效 */
+  --hs-dur-1: 120ms;
+  --hs-dur-2: 200ms;
+  --hs-dur-3: 600ms;
+  --hs-ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* 层级：品牌 < 面板 < 加载遮罩 */
+  --hs-z-brand: 10;
+  --hs-z-hud: 20;
+  --hs-z-loader: 60;
+}
+
+/* 选中填充：先按色带预置 rgba，避免依赖 color-mix（Safari 16.2 才有） */
+:root {
+  --hs-fill-sel: rgba(255, 201, 126, 0.14);
+  --hs-fill-sel-hover: rgba(255, 201, 126, 0.22);
+}
+
+/* 时刻色带切档（由 hud.ts 按小时写 html[data-band]，每天最多切 3 次，非每帧） */
+:root[data-band='dawn'] {
+  --hs-accent: var(--hs-band-dawn);
+  --hs-fill-sel: rgba(240, 201, 168, 0.14);
+  --hs-fill-sel-hover: rgba(240, 201, 168, 0.22);
+}
+:root[data-band='day'] {
+  --hs-accent: var(--hs-band-day);
+  --hs-fill-sel: rgba(158, 203, 255, 0.14);
+  --hs-fill-sel-hover: rgba(158, 203, 255, 0.22);
+}
+:root[data-band='dusk'] {
+  --hs-accent: var(--hs-band-dusk);
+  --hs-fill-sel: rgba(255, 201, 126, 0.14);
+  --hs-fill-sel-hover: rgba(255, 201, 126, 0.22);
+}
+:root[data-band='night'] {
+  --hs-accent: var(--hs-band-night);
+  --hs-fill-sel: rgba(200, 214, 234, 0.14);
+  --hs-fill-sel-hover: rgba(200, 214, 234, 0.22);
+}
+
+/* 季节联动：只调面板描边的色温（取自四季自身色相），不动字号/间距/文字色。
+   四档幅度一致，换季时面板会“冷一点/暖一点”，但版面纹丝不动。 */
+:root[data-season='sp'] { --hs-edge: rgba(206, 224, 194, 0.18); }
+:root[data-season='su'] { --hs-edge: rgba(198, 232, 214, 0.18); }
+:root[data-season='au'] { --hs-edge: rgba(232, 206, 172, 0.18); }
+:root[data-season='wi'] { --hs-edge: rgba(198, 216, 238, 0.20); }
+
+/* 天气联动：雨雪天画面噪点多、亮部大，面板加厚以稳住正文对比度 */
+:root[data-weather='cloudy'] { --hs-panel: rgba(11, 14, 20, 0.88); }
+:root[data-weather='rain'] { --hs-panel: rgba(11, 14, 20, 0.90); }
+:root[data-weather='snow'] { --hs-panel: rgba(11, 14, 20, 0.90); }
+
+/* ---------- 2. reset 与画布 ---------- */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: var(--hs-ink-900); }
+body {
+  font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    "Source Han Sans SC", "Noto Sans CJK SC", system-ui, sans-serif;
+  color: var(--hs-text-1);
+  -webkit-font-smoothing: antialiased;
+}
+#app { position: fixed; inset: 0; }
+#app canvas { display: block; }
+
+/* ---------- 3. 加载遮罩 ---------- */
+#loader {
+  position: fixed; inset: 0; z-index: var(--hs-z-loader);
+  display: flex; align-items: center; justify-content: center;
+  background: var(--hs-ink-900); color: var(--hs-text-3);
+  font-size: var(--hs-fs-label); letter-spacing: 0.24em;
+  transition: opacity var(--hs-dur-3) ease, visibility 0s linear var(--hs-dur-3);
+  pointer-events: none;
+}
+#loader.done { opacity: 0; visibility: hidden; }
+
+/* ---------- 4. 品牌区 ---------- */
+#brand {
+  position: fixed; top: 28px; z-index: var(--hs-z-brand);
+  /* 刘海横屏左右各有约 44px 安全区，标题与面板都必须避让 */
+  left: calc(32px + env(safe-area-inset-left, 0px));
+  pointer-events: none;
+  /* 亮场景（雪地正午）下标题曾低至 1.0:1，衬底由 ::before 承担 */
+  padding: 14px 20px;
+}
+/* 渐变扫描衬底：横向渐隐，避免出现一块生硬矩形 */
+#brand::before {
+  content: ''; position: absolute; inset: -32px auto auto -32px;
+  width: calc(100% + 96px); height: 168px;
+  background: linear-gradient(
+    180deg,
+    rgba(11, 14, 20, 0.92) 0%,
+    rgba(11, 14, 20, 0.86) 62%,
+    rgba(11, 14, 20, 0) 100%
+  );
+  /* 平台必须盖住副标题 p（中心在 55%），横向淡出必须晚于 p 右端（约 72%）：
+     否则有效 scrim 只有 0.25，纯白底上副标题跌到 1.07:1 */
+  -webkit-mask-image: linear-gradient(90deg, #000 0%, #000 88%, transparent 100%);
+  mask-image: linear-gradient(90deg, #000 0%, #000 88%, transparent 100%);
+  z-index: -1;
+}
+#brand h1 {
+  font-family: Georgia, "Times New Roman", "Songti SC", "Noto Serif CJK SC", serif;
+  font-size: var(--hs-fs-brand); font-weight: 600;
+  letter-spacing: 0.34em; color: var(--hs-brand-ink);
+  /* 字距会在末字右侧留白，负 margin 抵消以保持左对齐视觉 */
+  margin-right: -0.34em;
+}
+#brand p {
+  margin-top: 8px; font-size: var(--hs-fs-label);
+  letter-spacing: 0.16em; color: var(--hs-text-2);
+}
+
+/* ---------- 5. HUD 面板 ---------- */
+#hud {
+  position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%); z-index: var(--hs-z-hud);
+  width: min(
+    560px,
+    calc(100vw - 32px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px))
+  );
+  padding: 14px 18px 16px;
+  background: var(--hs-panel);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--hs-edge);
+  border-radius: var(--hs-r-lg);
+  box-shadow: 0 16px 48px -12px rgba(0, 0, 0, 0.65), 0 2px 8px rgba(0, 0, 0, 0.35);
+  user-select: none;
+  touch-action: manipulation;
+}
+
+/* 读出区：左侧 时间大字 + 语境小字（唯一 aria-live 节点），右侧 巡游开关 */
+#readout {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 12px; margin-bottom: 12px;
+}
+.readout-main {
+  display: flex; flex-direction: column; align-items: flex-start;
+  gap: 5px; min-width: 0;
+}
+#moodTime {
+  font-family: Georgia, "Times New Roman", "Songti SC", "Noto Serif CJK SC", serif;
+  font-size: var(--hs-fs-time); font-weight: 600;
+  letter-spacing: 0.14em; color: var(--hs-text-1);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+#moodCtx {
+  font-size: var(--hs-fs-label); letter-spacing: 0.18em;
+  color: var(--hs-text-3);
+}
+
+/* ---------- 6. 组件 ---------- */
+.tabrow {
+  display: flex; align-items: center;
+  gap: var(--hs-row-gap);
+}
+.tabrow + .tabrow { margin-top: var(--hs-row-gap); }
+
+.tablabel {
+  flex: 0 0 2.8em; text-align: right;
+  font-size: var(--hs-fs-label); letter-spacing: 0.12em;
+  color: var(--hs-text-3);
+}
+
+.tab, .chip {
+  flex: 0 0 auto;
+  position: relative;
+  min-width: var(--hs-ctl-min-w); height: var(--hs-ctl-h);
+  padding: 0 10px;
+  border: 1px solid var(--hs-hairline);
+  border-radius: var(--hs-r-md);
+  background: var(--hs-fill-rest);
+  color: var(--hs-text-1);
+  font-family: inherit; font-size: var(--hs-fs-ctl);
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition:
+    background-color var(--hs-dur-1) ease,
+    border-color var(--hs-dur-1) ease,
+    color var(--hs-dur-2) var(--hs-ease),
+    transform var(--hs-dur-1) var(--hs-ease);
+}
+.chip { min-width: 40px; }
+/* 命中区外扩到 ≥44px：用透明伪元素而不是加大盒子，避免挤压布局 */
+.tab::before, .chip::before {
+  content: ''; position: absolute;
+  inset: calc(-1 * var(--hs-hit));
+}
+
+.tab:hover, .chip:hover { background: var(--hs-fill-hover); }
+.tab:active, .chip:active {
+  background: var(--hs-fill-press);
+  transform: scale(0.96);
+}
+
+/* 巡游是次要动作：放在读出区右侧独立成块，不与天气四选项混为一组 */
+.tour { flex: 0 0 auto; align-self: center; }
+
+/* 时刻滑杆：完全自绘（原来只有 accent-color，形态全部交给 UA） */
+#hourSlider {
+  -webkit-appearance: none; appearance: none;
+  flex: 1 1 auto; min-width: 0; height: var(--hs-ctl-h);
+  margin: 0; padding: 0; background: transparent;
+  cursor: pointer;
+  touch-action: pan-y;
+}
+#hourSlider::-webkit-slider-runnable-track {
+  height: 4px; border-radius: var(--hs-r-full);
+  background: linear-gradient(
+    90deg,
+    var(--hs-accent) 0 var(--hs-fill, 0%),
+    rgba(255, 255, 255, 0.18) var(--hs-fill, 0%) 100%
+  );
+}
+#hourSlider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 16px; height: 16px; margin-top: -6px;
+  border: 2px solid var(--hs-ink-900); border-radius: 50%;
+  background: var(--hs-text-1);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4), 0 2px 6px rgba(0, 0, 0, 0.5);
+  transition: transform var(--hs-dur-1) var(--hs-ease);
+}
+#hourSlider:hover::-webkit-slider-thumb { transform: scale(1.12); }
+#hourSlider:active::-webkit-slider-thumb { transform: scale(1.22); }
+#hourSlider::-moz-range-track {
+  height: 4px; border-radius: var(--hs-r-full);
+  background: rgba(255, 255, 255, 0.18);
+}
+#hourSlider::-moz-range-progress {
+  height: 4px; border-radius: var(--hs-r-full);
+  background: var(--hs-accent);
+}
+#hourSlider::-moz-range-thumb {
+  width: 12px; height: 12px;
+  border: 2px solid var(--hs-ink-900); border-radius: 50%;
+  background: var(--hs-text-1);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4);
+}
+
+/* ---------- 7. 状态 ---------- */
+/* 选中态：时刻色带着色 + accent 描边，而不是反白块
+   （三组同时 2~3 个反白块在暗面板上会抢掉 3D 画面的注意力，
+   与 docs/项目方案.md:64「HUD 反向克制」冲突；实测文字对选中填充 ≥6.1:1） */
+.tab[aria-pressed='true'], .chip[aria-pressed='true'] {
+  background: var(--hs-fill-sel);
+  border-color: var(--hs-accent);
+  color: var(--hs-accent);
+  font-weight: 600;
+}
+/* 选中指示条：1.4.11 要求状态指示自身对相邻色 ≥3:1，
+   "描边换个浅色"在暗面板上最多只有 2.1:1，只能靠几何新增信号。
+   条本身是 accent 实色直接压在面板上，四档实测 7.86–9.02:1。 */
+.tab[aria-pressed='true']::after, .chip[aria-pressed='true']::after {
+  content: ''; position: absolute;
+  left: 50%; bottom: 3px; width: 14px; height: 2px;
+  margin-left: -7px; border-radius: var(--hs-r-full);
+  background: var(--hs-accent);
+}
+/* hover 与选中特异性相同，需显式补：原来 hover 提亮背景反而让深色文字对比度下降 */
+.tab[aria-pressed='true']:hover, .chip[aria-pressed='true']:hover {
+  background: var(--hs-fill-sel-hover);
+  border-color: var(--hs-accent);
+  color: var(--hs-accent);
+}
+.tab[aria-pressed='true']:active, .chip[aria-pressed='true']:active {
+  transform: scale(0.96);
+}
+
+/* 焦点环：必须用 outline（box-shadow 会被高对比度模式清除），offset ≥2px 才能落在面板上 */
+.tab:focus-visible,
+.chip:focus-visible,
+#hourSlider:focus-visible,
+#tourBtn:focus-visible {
+  outline: 2px solid var(--hs-focus);
+  outline-offset: 2px;
+}
+
+/* ---------- 8. 响应式 ---------- */
+@media (max-width: 899px) {
+  /* 命中区外扩恒等于行间距的一半，否则相邻按钮的可点区域会互相啃掉 */
+  :root { --hs-fs-brand: 22px; --hs-row-gap: 8px; --hs-hit: 4px; }
+  #brand { top: 20px; left: calc(22px + env(safe-area-inset-left, 0px)); padding: 12px 16px; }
+  #hud { bottom: calc(20px + env(safe-area-inset-bottom, 0px)); padding: 12px 14px 14px; }
+}
+
+@media (max-width: 640px) {
+  /* 320px 视口逐像素核算：内容宽 268px，行内 26.4 + 4*40 + 44 + 5*6 = 260.4px，不触发行换行。
+     行距 6px 恰好等于 2 倍命中外扩，相邻命中区相接但不重叠。 */
+  :root {
+    --hs-fs-brand: 19px; --hs-fs-time: 18px;
+    /* 38 + 3*2 = 44px 命中高；宽度不受影响（行内需求 214px < 内容宽 268px） */
+    --hs-ctl-h: 38px; --hs-row-gap: 6px; --hs-hit: 3px;
+  }
+  #brand { top: 16px; left: calc(12px + env(safe-area-inset-left, 0px)); padding: 10px 12px; }
+  #brand p { letter-spacing: 0.1em; }
+  #hud {
+    left: calc(12px + env(safe-area-inset-left, 0px));
+    right: calc(12px + env(safe-area-inset-right, 0px));
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    transform: none; width: auto;
+    padding: 12px 14px; border-radius: var(--hs-r-md);
+  }
+  .tablabel { flex: 0 0 2em; }
+  /* 命中区在窄屏靠伪元素外扩，按钮盒子保持 36px，避免撑破 320px 行宽 */
+  .tab, .chip { min-width: 40px; padding: 0 8px; }
+  /* 滑杆独占一行，避免与四个季节按钮抢宽度导致 320px 溢出 */
+  #hourSlider {
+    flex: 1 1 100%; order: 10;
+    min-width: 0; height: var(--hs-ctl-h);
+  }
+  .tabrow { flex-wrap: wrap; }
+}
+
+@media (max-height: 480px) and (orientation: landscape) {
+  /* 横屏的唯一矛盾是垂直空间：568×320 下原版 HUD 占 63% 屏高。
+     改成 2 列网格（时刻行跨列，季节与天气并排），高度收到约 136px = 42%。 */
+  :root { --hs-fs-brand: 18px; --hs-ctl-h: 38px; --hs-row-gap: 6px; --hs-hit: 3px; }
+  #brand { top: 12px; left: 14px; padding: 8px 12px; }
+  #brand::before { height: 120px; }
+
+  #hud {
+    left: 50%; right: auto; transform: translateX(-50%);
+    width: min(
+      720px,
+      calc(100vw - 24px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px))
+    );
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    padding: 8px 14px 10px;
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: var(--hs-row-gap) 16px;
+  }
+  #readout { grid-column: 1 / -1; margin-bottom: 0; }
+  /* #hud 的第 2 个子元素是时刻行，跨满两列 */
+  #hud > .tabrow:nth-child(2) { grid-column: 1 / -1; }
+  .tabrow + .tabrow { margin-top: 0; }
+  /* 撤销窄屏的滑杆独占一行 */
+  #hourSlider { flex: 1 1 auto; order: 0; height: var(--hs-ctl-h); }
+  /* 窄屏分支的 flex-wrap 在横屏下仍然生效，会让季节/天气行折成两行、高度回到 55% */
+  .tabrow { flex-wrap: nowrap; }
+}
+
+/* 横屏且窄于 560px 时两列宽度不足以同时放下 4 个按钮 + 行标签：
+   隐藏行标签（仍供 aria-labelledby 取用），把行宽从 238/252 降到 178/192 */
+@media (max-height: 480px) and (orientation: landscape) and (max-width: 560px) {
+  .tablabel {
+    position: absolute; width: 1px; height: 1px;
+    overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
+}
+
+/* ---------- 9. 兼容与动效降级 ---------- */
+/* 不支持 backdrop-filter 时退回实色底，对比度反而更高 */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  #hud { background: var(--hs-panel-solid); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 1ms !important;
+    animation-duration: 1ms !important;
+  }
+}
+
+@media (forced-colors: active) {
+  .tab[aria-pressed='true'],
+  .chip[aria-pressed='true'] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+}

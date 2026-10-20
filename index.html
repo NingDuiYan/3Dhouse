@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <title>四时之屋 · House of Seasons</title>
+</head>
+<body>
+  <main id="app" aria-label="四时之屋 3D 场景"></main>
+  <div id="loader" role="status" aria-live="polite">正在构建场景 …</div>
+
+  <header id="brand">
+    <h1>四时之屋</h1>
+    <p>House of Seasons · 拖拽旋转 / 滚轮缩放</p>
+  </header>
+
+  <section id="hud" aria-label="场景控制">
+    <div id="readout">
+      <span class="readout-main">
+        <span id="moodTime">16:30</span>
+        <span id="moodCtx" role="status" aria-live="polite">秋 · 晴</span>
+      </span>
+      <button class="tab tour" type="button" id="tourBtn" aria-label="自动巡游视角" aria-pressed="false">巡游</button>
+    </div>
+
+    <div class="tabrow" role="group" aria-labelledby="lbl-time">
+      <span class="tablabel" id="lbl-time">时刻</span>
+      <button class="chip" type="button" data-snap="7.5" aria-label="跳到早晨 07:30" aria-pressed="false">早</button>
+      <button class="chip" type="button" data-snap="12.5" aria-label="跳到正午 12:30" aria-pressed="false">中</button>
+      <button class="chip" type="button" data-snap="18.5" aria-label="跳到傍晚 18:30" aria-pressed="false">晚</button>
+      <input id="hourSlider" type="range" min="0" max="24" step="0.05" value="16.5"
+             aria-label="时刻" aria-valuetext="16:30">
+    </div>
+
+    <div class="tabrow" role="group" aria-labelledby="lbl-season">
+      <span class="tablabel" id="lbl-season">季节</span>
+      <button class="tab" type="button" data-season="sp" aria-label="春季" aria-pressed="false">春</button>
+      <button class="tab" type="button" data-season="su" aria-label="夏季" aria-pressed="false">夏</button>
+      <button class="tab" type="button" data-season="au" aria-label="秋季" aria-pressed="true">秋</button>
+      <button class="tab" type="button" data-season="wi" aria-label="冬季" aria-pressed="false">冬</button>
+    </div>
+
+    <div class="tabrow" role="group" aria-labelledby="lbl-weather">
+      <span class="tablabel" id="lbl-weather">天气</span>
+      <button class="tab" type="button" data-weather="clear" aria-label="晴天" aria-pressed="true">晴</button>
+      <button class="tab" type="button" data-weather="cloudy" aria-label="多云" aria-pressed="false">多云</button>
+      <button class="tab" type="button" data-weather="rain" aria-label="下雨" aria-pressed="false">雨</button>
+      <button class="tab" type="button" data-weather="snow" aria-label="下雪" aria-pressed="false">雪</button>
+    </div>
+  </section>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

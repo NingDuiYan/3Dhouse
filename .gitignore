@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.iga/
+.screenshots/
+.trae/
+.trae-html-share-packages/
+.vscode/

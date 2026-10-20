@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-band="dusk" data-season="au" data-weather="clear">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <title>四时之屋 · HUD 视觉预览（不启动 3D）</title>
+  <!-- 直接复用产品样式表：改动 style.css 后刷新本页即可看到真实效果 -->
+  <link rel="stylesheet" href="../src/ui/style.css">
+  <style>
+    /* 仅预览页自身：用纯 CSS 模拟极端场景底，用于验证 HUD 对比度，不渲染 3D */
+    #app { background: var(--stage, #0b0e14); transition: background 400ms ease; }
+    #app::after {
+      content: ''; position: absolute; inset: 0;
+      background: var(--glare, none); pointer-events: none;
+    }
+    body[data-scene='dawn'] { --stage: #c9a894; --glare: linear-gradient(180deg, #e8cbb4 0%, #7f93a8 60%, #38424f 100%); }
+    body[data-scene='noon'] { --stage: #8fc1e9; --glare: linear-gradient(180deg, #8fc1e9 0%, #cfe3f2 55%, #eef2f5 100%); }
+    body[data-scene='dusk'] { --stage: #2b3446; --glare: linear-gradient(180deg, #1d2739 0%, #6b5a63 55%, #e8a765 100%); }
+    body[data-scene='night'] { --stage: #0a0d14; --glare: linear-gradient(180deg, #05070c 0%, #101724 60%, #1b2331 100%); }
+    body[data-scene='snow'] { --stage: #f0f2f5; --glare: linear-gradient(180deg, #cfd9e6 0%, #eef2f5 60%, #ffffff 100%); }
+
+    /* 预览页自身控件（不属于产品 UI） */
+    #previewbar {
+      position: fixed; top: 12px; right: 16px; z-index: 100;
+      display: flex; flex-wrap: wrap; gap: 6px; padding: 6px; max-width: 300px;
+      background: rgba(11, 14, 20, 0.86);
+      border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 10px;
+      font: 12px/1 system-ui, sans-serif;
+    }
+    #previewbar button {
+      padding: 7px 10px; border-radius: 7px; cursor: pointer;
+      background: rgba(255, 255, 255, 0.08); color: #f2f4f8;
+      border: 1px solid rgba(255, 255, 255, 0.2); font: inherit;
+    }
+    #previewbar button:hover { background: rgba(255, 255, 255, 0.16); }
+    #previewbar button:focus-visible { outline: 2px solid #8ecbff; outline-offset: 2px; }
+    #previewbar .sep { width: 100%; height: 1px; background: rgba(255, 255, 255, 0.16); margin: 2px 0; }
+  </style>
+</head>
+<body data-scene="noon">
+  <!-- 画布占位：真实产品里这里是 WebGL canvas -->
+  <main id="app" aria-label="四时之屋 3D 场景（预览页占位）"></main>
+
+  <div id="previewbar" role="group" aria-label="预览控制">
+    <span>场景底</span>
+    <button type="button" data-scene="dawn">晨</button>
+    <button type="button" data-scene="noon">正午</button>
+    <button type="button" data-scene="dusk">暮</button>
+    <button type="button" data-scene="night">夜</button>
+    <button type="button" data-scene="snow">雪地（最坏底）</button>
+    <div class="sep"></div>
+    <span>用键盘 Tab 走一遍可看焦点环与选中指示条</span>
+  </div>
+
+  <header id="brand">
+    <h1>四时之屋</h1>
+    <p>House of Seasons · 拖拽旋转 / 滚轮缩放</p>
+  </header>
+
+  <section id="hud" aria-label="场景控制">
+    <div id="readout">
+      <span class="readout-main">
+        <span id="moodTime">16:30</span>
+        <span id="moodCtx" role="status" aria-live="polite">秋 · 晴</span>
+      </span>
+      <button class="tab tour" type="button" id="tourBtn" aria-label="自动巡游视角" aria-pressed="false">巡游</button>
+    </div>
+
+    <div class="tabrow" role="group" aria-labelledby="lbl-time">
+      <span class="tablabel" id="lbl-time">时刻</span>
+      <button class="chip" type="button" data-snap="7.5" aria-label="跳到早晨 07:30" aria-pressed="false">早</button>
+      <button class="chip" type="button" data-snap="12.5" aria-label="跳到正午 12:30" aria-pressed="false">中</button>
+      <button class="chip" type="button" data-snap="18.5" aria-label="跳到傍晚 18:30" aria-pressed="false">晚</button>
+      <input id="hourSlider" type="range" min="0" max="24" step="0.05" value="16.5"
+             aria-label="时刻" aria-valuetext="16:30" style="--hs-fill: 68.75%">
+    </div>
+
+    <div class="tabrow" role="group" aria-labelledby="lbl-season">
+      <span class="tablabel" id="lbl-season">季节</span>
+      <button class="tab" type="button" data-season="sp" aria-label="春季" aria-pressed="false">春</button>
+      <button class="tab" type="button" data-season="su" aria-label="夏季" aria-pressed="false">夏</button>
+      <button class="tab" type="button" data-season="au" aria-label="秋季" aria-pressed="true">秋</button>
+      <button class="tab" type="button" data-season="wi" aria-label="冬季" aria-pressed="false">冬</button>
+    </div>
+
+    <div class="tabrow" role="group" aria-labelledby="lbl-weather">
+      <span class="tablabel" id="lbl-weather">天气</span>
+      <button class="tab" type="button" data-weather="clear" aria-label="晴天" aria-pressed="true">晴</button>
+      <button class="tab" type="button" data-weather="cloudy" aria-label="多云" aria-pressed="false">多云</button>
+      <button class="tab" type="button" data-weather="rain" aria-label="下雨" aria-pressed="false">雨</button>
+      <button class="tab" type="button" data-weather="snow" aria-label="下雪" aria-pressed="false">雪</button>
+    </div>
+  </section>
+
+  <script type="module">
+    // 预览页交互：与产品 hud.ts 行为等价的最小实现
+    const root = document.documentElement
+    const bandOf = (h) => (h >= 5 && h < 8 ? 'dawn' : h >= 8 && h < 17 ? 'day' : h >= 17 && h < 20 ? 'dusk' : 'night')
+    const CX = { sp: '春', su: '夏', au: '秋', wi: '冬' }
+    const WX = { clear: '晴', cloudy: '多云', rain: '雨', snow: '雪' }
+
+    const slider = document.getElementById('hourSlider')
+    const moodTime = document.getElementById('moodTime')
+    const moodCtx = document.getElementById('moodCtx')
+    const tourBtn = document.getElementById('tourBtn')
+
+    const state = { hour: 16.5, season: 'au', weather: 'clear' }
+
+    function syncSlider() {
+      slider.value = String(state.hour)
+      const hh = String(Math.floor(state.hour) % 24).padStart(2, '0')
+      const mm = String(Math.floor((state.hour % 1) * 60)).padStart(2, '0')
+      moodTime.textContent = hh + ':' + mm
+      slider.setAttribute('aria-valuetext', hh + ':' + mm)
+      slider.style.setProperty('--hs-fill', (state.hour / 24) * 100 + '%')
+      const band = bandOf(state.hour)
+      if (root.dataset.band !== band) root.dataset.band = band
+    }
+
+    function syncSceneAttrs() {
+      if (root.dataset.season !== state.season) root.dataset.season = state.season
+      if (root.dataset.weather !== state.weather) root.dataset.weather = state.weather
+    }
+
+    function refreshReadout() {
+      const ctx = CX[state.season] + ' · ' + WX[state.weather]
+      if (moodCtx.textContent !== ctx) moodCtx.textContent = ctx
+    }
+
+    function refresh() {
+      syncSlider(); syncSceneAttrs(); refreshReadout()
+      for (const b of document.querySelectorAll('.chip[data-snap]')) {
+        b.setAttribute('aria-pressed', String(Math.abs(state.hour - Number(b.dataset.snap)) < 0.001))
+      }
+      for (const b of document.querySelectorAll('.tab[data-season]')) {
+        b.setAttribute('aria-pressed', String(b.dataset.season === state.season))
+      }
+      for (const b of document.querySelectorAll('.tab[data-weather]')) {
+        b.setAttribute('aria-pressed', String(b.dataset.weather === state.weather))
+      }
+    }
+
+    slider.addEventListener('input', () => { state.hour = Number(slider.value); syncSlider(); refreshReadout(); refresh() })
+    for (const b of document.querySelectorAll('.chip[data-snap]')) {
+      b.addEventListener('click', () => { state.hour = Number(b.dataset.snap); refresh() })
+    }
+    for (const b of document.querySelectorAll('.tab[data-season]')) {
+      b.addEventListener('click', () => { state.season = b.dataset.season; refresh() })
+    }
+    for (const b of document.querySelectorAll('.tab[data-weather]')) {
+      b.addEventListener('click', () => { state.weather = b.dataset.weather; refresh() })
+    }
+    tourBtn.addEventListener('click', () => {
+      tourBtn.setAttribute('aria-pressed', String(tourBtn.getAttribute('aria-pressed') !== 'true'))
+    })
+    for (const btn of document.querySelectorAll('#previewbar button')) {
+      btn.addEventListener('click', () => { document.body.dataset.scene = btn.dataset.scene })
+    }
+
+    refresh()
+  </script>
+</body>
+</html>
