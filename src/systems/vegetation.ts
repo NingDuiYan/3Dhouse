@@ -33,14 +33,16 @@ function mergeParts(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
 
 /** 叶团卡片沿垂直方向的收缩比：树冠横向比纵向更宽 */
 const CARD_SQUASH_Y = 0.72
-/** 阔叶树冠：外圈叶团数 / 内层叶团数（内层压暗，模拟冠内不见天光） */
-const BROADLEAF_BLOBS = 64
-const BROADLEAF_INNER = 26
+/** 阔叶树冠：外圈叶团数 / 内层叶团数（内层压暗，模拟冠内不见天光）
+ *  卡片缩到 0.3~0.5 冠幅半径后数量要跟上：单张卡一大，正对低阳时
+ *  整片被照成一块均匀的浅色平面，远看就像半透明方块 */
+const BROADLEAF_BLOBS = 120
+const BROADLEAF_INNER = 48
 /** 灌木叶团数（小体量，够密就行） */
 const BUSH_BLOBS = 20
 /** 针叶：冠层数 / 每层枝条数（枝条卡片沿周向排布，替代整块锥面） */
 const CONIFER_LAYERS = 9
-const CONIFER_SPRAYS = 9
+const CONIFER_SPRAYS = 13
 /** 针叶冠内芯锥的径向分段：只当"挡光的深色芯"，轮廓由枝条决定 */
 const CONIFER_CORE_SEGS = 8
 /** 阔叶树冠中心相对树高的比例：树冠落在上部，主干下部露出来 */
@@ -55,10 +57,11 @@ const FAR_BASE = new THREE.Color(0x36402f)
 const FAR_FOG_MIX = 0.3
 /** 远景树干埋深（米）：只留一小段落地干身，冠底压到近地面，不露长裸干 */
 const FAR_SINK = 8
-/** 远景树线参数：26 株围一圈（60~110m），只留整株锥形剪影 */
-const FAR_TREES = 34
-const FAR_R_MIN = 60
-const FAR_R_MAX = 110
+/** 远景树线参数：72 株围一圈（55~120m），只留整株锥形剪影
+ *  密度足够时天际线由树冠咬合而成，远景丘陵的坡面边不会再裸露成"薄片" */
+const FAR_TREES = 72
+const FAR_R_MIN = 55
+const FAR_R_MAX = 120
 const FAR_H_MIN = 8
 const FAR_H_MAX = 13
 
@@ -219,7 +222,7 @@ function broadleafCrownGeo(
     const phi = Math.acos(2 * rand(s + 7) - 1)
     const r = radius * (0.55 + rand(s + 5) * 0.45)
     const sinPhi = Math.sin(phi)
-    const size = radius * (0.46 + rand(s + 8) * 0.34)
+    const size = radius * (0.28 + rand(s + 8) * 0.2)
     const geo: THREE.BufferGeometry[] = []
     pushCrossCard(geo, size, size * (0.86 + rand(s + 9) * 0.24), s, 0.74 + rand(s + 10) * 0.26)
     for (const g of geo) {
@@ -235,7 +238,7 @@ function broadleafCrownGeo(
     const phi = Math.acos(2 * rand(s + 7) - 1)
     const r = radius * (0.08 + rand(s + 5) * 0.4)
     const sinPhi = Math.sin(phi)
-    const size = radius * (0.5 + rand(s + 8) * 0.3)
+    const size = radius * (0.3 + rand(s + 8) * 0.22)
     const geo: THREE.BufferGeometry[] = []
     pushCrossCard(geo, size, size * 0.9, s, 0.42 + rand(s + 9) * 0.18)
     for (const g of geo) {
@@ -261,13 +264,13 @@ function coniferSpraysGeo(span: number, r: number, seed: number): THREE.BufferGe
     const rr = r * (1 - t * 0.84) * (0.9 + rand(s + 9) * 0.2)
     // 底层更暗（被上层遮光），顶层最亮
     const shade = 0.6 + t * 0.28 + rand(s + 10) * 0.1
-    const sprays = CONIFER_SPRAYS - (t > 0.75 ? 2 : 0)
+    const sprays = CONIFER_SPRAYS - (t > 0.75 ? 3 : 0)
     for (let k = 0; k < sprays; k++) {
       const ss = s + k * 13
       const az = rand(ss) * Math.PI * 2 + (k / sprays) * Math.PI * 2
       // 枝条：外端下垂，宽度略大于层半径的半径，让相邻枝交叠
-      const len = rr * (1.15 + rand(ss + 1) * 0.35)
-      const wid = len * 0.62
+      const len = rr * (0.85 + rand(ss + 1) * 0.35)
+      const wid = len * 0.55
       const card: THREE.BufferGeometry[] = []
       pushCrossCard(card, len, wid, ss + 3, shade)
       for (const g of card) {

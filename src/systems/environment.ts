@@ -8,11 +8,13 @@ import {
   GROUND_TILE_METERS,
   SNOW_GROUND_OPACITY,
   SNOW_ROOF_OPACITY,
+  TERRAIN_BLEND,
   TERRAIN_FLAT_RADIUS,
   TERRAIN_HILL_HEIGHT,
   TERRAIN_HILL_SCALE,
   TERRAIN_SEGMENTS,
   TERRAIN_SIZE,
+  TERRAIN_SLOPE_DARK,
   WET_RATE
 } from '../config'
 
@@ -67,12 +69,28 @@ function createTerrainGeometry(): THREE.BufferGeometry {
     const y = pos.getY(i)
     // 平面几何在 XY 上生成，rotation.x = -PI/2 后 y 轴变成 -z
     const r = Math.hypot(x, y)
-    const blend = smoothstep(TERRAIN_FLAT_RADIUS, TERRAIN_FLAT_RADIUS + 60, r)
+    const blend = smoothstep(TERRAIN_FLAT_RADIUS, TERRAIN_FLAT_RADIUS + TERRAIN_BLEND, r)
     pos.setZ(i, hillHeight(x, -y) * TERRAIN_HILL_HEIGHT * blend)
   }
   pos.needsUpdate = true
   geo.computeVertexNormals()
   geo.rotateX(-Math.PI / 2)
+  // 顶点色 = 坡面自阴影 × 大尺度斑驳：丘陵因此有明暗起伏，
+  // 不会在雾里塌成一片均匀浅色"薄片"（顶点色只作用于地面材质，积雪层材质不读它）
+  const nrm = geo.attributes.normal as THREE.BufferAttribute
+  const colors = new Float32Array(pos.count * 3)
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i)
+    const z = pos.getZ(i)
+    const slope = 1 - Math.max(0, Math.min(1, nrm.getY(i)))
+    const shade = 1 - Math.min(1, slope * 1.7) * TERRAIN_SLOPE_DARK
+    const patch = 0.9 + smoothNoise(x * 0.045 + 3, z * 0.045 + 9) * 0.18
+    const v = shade * patch
+    colors[i * 3] = v
+    colors[i * 3 + 1] = v
+    colors[i * 3 + 2] = v
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
   return geo
 }
 
@@ -96,7 +114,9 @@ export function createEnvironment(
     color: 0x8a6830,
     roughness: 1,
     metalness: 0,
-    envMapIntensity: 0.55
+    // 顶点色承载坡面明暗；环境反射压到 0.4，避免远景坡面被天空照成一片死白
+    vertexColors: true,
+    envMapIntensity: 0.4
   })
   const ground = new THREE.Mesh(createTerrainGeometry(), groundMat)
   ground.position.y = 0

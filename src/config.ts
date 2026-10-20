@@ -3,8 +3,9 @@ import type { QualityCaps, QualityTier } from './types'
 /** 全局常量：集中管理调参入口，禁止在系统内散落魔法数字 */
 export const DPR_MAX = 2
 export const SHADOW_SIZE = 2048
-/** 阴影相机半宽（场景半径约 12，收紧到 14） */
-export const SHADOW_HALF = 14
+/** 阴影相机半宽：低太阳角下房屋阴影会拉长到几十米，14 会在阴影贴图边界切出直边，
+ *  取 26 覆盖可见近景（2048 贴图下每像素约 2.5cm，仍足够锐利） */
+export const SHADOW_HALF = 26
 export const PARTICLE_MAX = 540
 /** 太阳光源距离（方向 × 该距离） */
 export const SUN_DIST = 45
@@ -67,7 +68,7 @@ export const GROUND_TILE_METERS = 4.3
 /** 地面贴图各向异性上限（掠射角下抑制远处摩尔纹） */
 export const GROUND_ANISOTROPY_MAX = 8
 /** 雾密度下限：保证远处地面圆盘边缘被雾吃掉，不露出硬边 */
-export const FOG_MIN_DENSITY = 0.009
+export const FOG_MIN_DENSITY = 0.012
 
 /** 云色混入太阳色的比例（日落时云被暖光染色）与中性基色 */
 export const CLOUD_SUN_MIX = 0.55
@@ -79,12 +80,17 @@ export const PORCH_LAMP_EMISSIVE = 3.2
 /** —— 写实风格重构：地形 / 相机 / 后处理 —— */
 /** 地面平面尺寸与细分：近处平整、远处起伏，靠细分把山坡做出来 */
 export const TERRAIN_SIZE = 340
-export const TERRAIN_SEGMENTS = 128
-/** 平坦区半径（米）：房屋与庭院范围内保持水平 */
-export const TERRAIN_FLAT_RADIUS = 26
+export const TERRAIN_SEGMENTS = 160
+/** 平坦区半径（米）：房屋与庭院范围内保持水平
+ *  取 78：丘陵从远景树线（60~110m）附近才开始抬升，避免近处出现又陡又大的低模坡面 */
+export const TERRAIN_FLAT_RADIUS = 78
+/** 平坦区到丘陵的过渡宽度（米）：过渡越长坡越缓，天际线越平滑 */
+export const TERRAIN_BLEND = 120
 /** 地形起伏最大高度（米）与噪声尺度（米） */
-export const TERRAIN_HILL_HEIGHT = 7.5
-export const TERRAIN_HILL_SCALE = 46
+export const TERRAIN_HILL_HEIGHT = 3.0
+export const TERRAIN_HILL_SCALE = 80
+/** 坡面自阴影强度（0~1）：按法线朝上程度压暗陡坡，消除"平板薄片"观感 */
+export const TERRAIN_SLOPE_DARK = 0.42
 /** 远景山体半径与高度（米）：只做天际线，位于雾中 */
 export const RIDGE_RADIUS = 150
 export const RIDGE_HEIGHT = 16
